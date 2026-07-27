@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -18,6 +18,19 @@ import geo, jyotish, interpret, render, rectify as rectify_engine, synastry as s
 
 app = FastAPI(title="Jyotish Almanac")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
+
+@app.exception_handler(Exception)
+async def any_error(request, exc):
+    # Never leak a raw "Internal Server Error" HTML page — the frontend expects JSON.
+    return JSONResponse(status_code=500, content={"detail": f"Ошибка сервера: {exc}"})
+
+@app.on_event("startup")
+def _warm_city_index():
+    # Build the worldwide city index once at boot, so the first visitor is fast.
+    try:
+        geo._index()
+    except Exception:
+        pass  # falls back to online lookup on first use if this ever fails
 
 class BirthData(BaseModel):
     name: str = "Гость"

@@ -67,7 +67,7 @@ h1,h2,.disp{font-family:'Cormorant Garamond',serif;font-weight:600;letter-spacin
 .ghost:hover{border-color:var(--gold);color:var(--parch);}
 .err{color:var(--red);font-size:14px;margin:12px 0 0;min-height:1em;}
 
-.hidden{display:none;}
+.hidden{display:none !important;}
 .rc-head{display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;}
 .rc-head h2{margin:0;}
 .badge{font-family:'Cormorant Garamond',serif;font-size:20px;color:#14142b;font-weight:600;
