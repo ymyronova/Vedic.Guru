@@ -87,6 +87,21 @@ def almanac(data: BirthData):
     return {"html": html, "meta": meta, "lagna_ru": chart["ascendant"]["sign_ru"],
             "has_ai": bool(os.environ.get("ANTHROPIC_API_KEY"))}
 
+@app.get("/api/geocode")
+def geocode(place: str = ""):
+    """Resolve a typed place name so the form can show which coordinates it will use.
+
+    Kept separate from the chart endpoints: it is cheap, offline, and safe to call
+    on every keystroke (debounced client-side).
+    """
+    place = (place or "").strip()
+    if not place:
+        raise HTTPException(400, "Укажите город.")
+    try:
+        return geo.resolve_place(place)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
 @app.get("/api/events")
 def event_catalog():
     """Category keys + human labels for the frontend dropdown."""

@@ -39,6 +39,62 @@ function showLoader(){
 }
 function hideLoader(){ $("loader").classList.add("hidden"); clearInterval(loadTimer); }
 
+// ---- live geocoding ----------------------------------------------------
+// As the user types a city we resolve it and fill the coordinate fields, so
+// what the form shows is always what the calculation will actually use.
+// Fields the user edited by hand are never overwritten.
+function attachGeocoder(placeId, latId, lonId, tzId, statusId){
+  const placeEl = $(placeId), latEl = $(latId), lonEl = $(lonId),
+        tzEl = $(tzId), st = $(statusId);
+  if (!placeEl || !st) return;
+  let timer = null, seq = 0;
+
+  // Typing in a coordinate field hands ownership of it to the user.
+  [latEl, lonEl, tzEl].forEach(el => el && el.addEventListener("input", () => {
+    delete el.dataset.auto;
+  }));
+
+  const setAuto = (el, val) => {
+    if (!el) return;
+    if (el.value && el.dataset.auto !== "1") return;  // user typed it — leave alone
+    el.value = val; el.dataset.auto = "1";
+  };
+  const clearAuto = el => {
+    if (el && el.dataset.auto === "1"){ el.value = ""; delete el.dataset.auto; }
+  };
+
+  async function lookup(){
+    const q = placeEl.value.trim();
+    if (!q){ st.textContent = ""; st.className = "geo"; [latEl,lonEl,tzEl].forEach(clearAuto); return; }
+    const mine = ++seq;                                  // drop out-of-order replies
+    st.textContent = "Ищу координаты…"; st.className = "geo";
+    try{
+      const r = await fetch("/api/geocode?place=" + encodeURIComponent(q));
+      const d = await r.json();
+      if (mine !== seq) return;
+      if (!r.ok) throw new Error(d.detail || "город не найден");
+      setAuto(latEl, d.lat.toFixed(4));
+      setAuto(lonEl, d.lon.toFixed(4));
+      setAuto(tzEl, d.tz);
+      const where = d.label + (d.cc ? ` (${d.cc})` : "");
+      st.textContent = `✓ ${where} · ${d.lat.toFixed(4)}, ${d.lon.toFixed(4)} · ${d.tz}`;
+      st.className = "geo ok";
+    }catch(e){
+      if (mine !== seq) return;
+      [latEl,lonEl,tzEl].forEach(clearAuto);
+      st.textContent = "✕ " + e.message + " — введите координаты вручную.";
+      st.className = "geo bad";
+    }
+  }
+
+  placeEl.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(lookup, 450); });
+  placeEl.addEventListener("blur", () => { clearTimeout(timer); lookup(); });
+}
+
+attachGeocoder("place",   "lat",   "lon",   "tz",   "geo-status");
+attachGeocoder("a-place", "a-lat", "a-lon", "a-tz", "a-geo-status");
+attachGeocoder("b-place", "b-lat", "b-lon", "b-tz", "b-geo-status");
+
 function birthPayload(){
   const p = {
     name: $("name").value.trim() || "Гость",
@@ -64,7 +120,8 @@ $("go").addEventListener("click", async () => {
   $("err").textContent = "";
   const p = birthPayload();
   if (!p.date){ $("err").textContent = "Укажите дату рождения."; return; }
-  if (!p.place && !(p.lat && p.lon)){ $("err").textContent = "Укажите место рождения или координаты."; return; }
+  if (!p.place && !(Number.isFinite(p.lat) && Number.isFinite(p.lon))){
+    $("err").textContent = "Укажите место рождения или координаты."; return; }
   showLoader();
   try{
     const res = await api("/api/rectify", p);
@@ -250,7 +307,8 @@ $("go-syn").addEventListener("click", async () => {
   $("syn-err").textContent = "";
   const a = personPayload("a"), b = personPayload("b");
   if (!a.date || !b.date){ $("syn-err").textContent = "Укажите даты рождения обоих."; return; }
-  if ((!a.place && !(a.lat&&a.lon)) || (!b.place && !(b.lat&&b.lon))){
+  const hasCoords = q => Number.isFinite(q.lat) && Number.isFinite(q.lon);
+  if ((!a.place && !hasCoords(a)) || (!b.place && !hasCoords(b))){
     $("syn-err").textContent = "Укажите место (или координаты) для обоих."; return; }
   lastName = (a.name + "_x_" + b.name);
   showLoader();

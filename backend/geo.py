@@ -98,8 +98,8 @@ def resolve_place(place: str) -> dict:
             chosen = next((t for t in cands if t[3] == country_hint), None)
         if chosen is None:
             chosen = cands[0]                      # highest population
-        _, lat, lon, _cc = chosen
-        return {"lat": lat, "lon": lon, "tz": tz_for(lat, lon), "label": place}
+        _, lat, lon, cc = chosen
+        return {"lat": lat, "lon": lon, "tz": tz_for(lat, lon), "label": place, "cc": cc}
 
     # online fallback — never allowed to crash the request
     try:
@@ -116,14 +116,14 @@ def resolve_place(place: str) -> dict:
             "или введите координаты вручную."
         )
     lat, lon = float(loc.latitude), float(loc.longitude)
-    return {"lat": lat, "lon": lon, "tz": tz_for(lat, lon), "label": loc.address}
+    return {"lat": lat, "lon": lon, "tz": tz_for(lat, lon), "label": loc.address, "cc": ""}
 
 def resolve(place, lat, lon, tz):
     """Prefer explicit lat/lon(+tz); else resolve the place name."""
     if lat is not None and lon is not None:
         return {"lat": float(lat), "lon": float(lon),
                 "tz": tz or tz_for(float(lat), float(lon)),
-                "label": place or f"{lat:.4f}, {lon:.4f}"}
+                "label": place or f"{lat:.4f}, {lon:.4f}", "cc": ""}
     if not place:
         raise ValueError("Укажите место рождения или координаты (широта/долгота).")
     return resolve_place(place)

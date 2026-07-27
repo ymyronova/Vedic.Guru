@@ -38,16 +38,17 @@
     </div>
     <div class="field">
       <label>Место рождения</label>
-      <input id="place" type="text" placeholder="Город, страна — напр. Киев, Украина">
-      <span class="hint">Если города нет в базе — раскройте «координаты вручную» ниже.</span>
+      <input id="place" type="text" placeholder="Город, страна" autocomplete="off">
+      <span class="geo" id="geo-status"></span>
+      <span class="hint">Координаты определяются автоматически. Если города нет в базе — раскройте «координаты вручную» ниже.</span>
     </div>
     <details class="manual">
       <summary>Координаты вручную</summary>
       <div class="row">
-        <div class="field"><label>Широта</label><input id="lat" type="number" step="0.0001" placeholder="50.4501"></div>
-        <div class="field"><label>Долгота</label><input id="lon" type="number" step="0.0001" placeholder="30.5234"></div>
+        <div class="field"><label>Широта</label><input id="lat" type="number" step="0.0001" placeholder="авто"></div>
+        <div class="field"><label>Долгота</label><input id="lon" type="number" step="0.0001" placeholder="авто"></div>
       </div>
-      <div class="field"><label>Часовой пояс (IANA, необязательно)</label><input id="tz" type="text" placeholder="Europe/Kiev"></div>
+      <div class="field"><label>Часовой пояс (IANA, необязательно)</label><input id="tz" type="text" placeholder="авто"></div>
     </details>
     <button id="go" class="cta">Рассчитать лагну →</button>
     <p class="err" id="err"></p>
@@ -63,11 +64,12 @@
         <div class="field"><label>Имя</label><input id="a-name" type="text" placeholder="Имя"></div>
         <div class="row"><div class="field"><label>Дата</label><input id="a-date" type="date"></div>
           <div class="field"><label>Время</label><input id="a-time" type="time" value="12:00"></div></div>
-        <div class="field"><label>Место</label><input id="a-place" type="text" placeholder="Город, страна"></div>
+        <div class="field"><label>Место</label><input id="a-place" type="text" placeholder="Город, страна" autocomplete="off">
+          <span class="geo" id="a-geo-status"></span></div>
         <details class="manual"><summary>координаты</summary>
-          <div class="row"><div class="field"><label>Широта</label><input id="a-lat" type="number" step="0.0001"></div>
-            <div class="field"><label>Долгота</label><input id="a-lon" type="number" step="0.0001"></div></div>
-          <div class="field"><label>Пояс (IANA)</label><input id="a-tz" type="text" placeholder="Europe/Kiev"></div>
+          <div class="row"><div class="field"><label>Широта</label><input id="a-lat" type="number" step="0.0001" placeholder="авто"></div>
+            <div class="field"><label>Долгота</label><input id="a-lon" type="number" step="0.0001" placeholder="авто"></div></div>
+          <div class="field"><label>Пояс (IANA)</label><input id="a-tz" type="text" placeholder="авто"></div>
         </details>
       </div>
       <div class="person">
@@ -75,11 +77,12 @@
         <div class="field"><label>Имя</label><input id="b-name" type="text" placeholder="Имя"></div>
         <div class="row"><div class="field"><label>Дата</label><input id="b-date" type="date"></div>
           <div class="field"><label>Время</label><input id="b-time" type="time" value="12:00"></div></div>
-        <div class="field"><label>Место</label><input id="b-place" type="text" placeholder="Город, страна"></div>
+        <div class="field"><label>Место</label><input id="b-place" type="text" placeholder="Город, страна" autocomplete="off">
+          <span class="geo" id="b-geo-status"></span></div>
         <details class="manual"><summary>координаты</summary>
-          <div class="row"><div class="field"><label>Широта</label><input id="b-lat" type="number" step="0.0001"></div>
-            <div class="field"><label>Долгота</label><input id="b-lon" type="number" step="0.0001"></div></div>
-          <div class="field"><label>Пояс (IANA)</label><input id="b-tz" type="text" placeholder="Europe/Moscow"></div>
+          <div class="row"><div class="field"><label>Широта</label><input id="b-lat" type="number" step="0.0001" placeholder="авто"></div>
+            <div class="field"><label>Долгота</label><input id="b-lon" type="number" step="0.0001" placeholder="авто"></div></div>
+          <div class="field"><label>Пояс (IANA)</label><input id="b-tz" type="text" placeholder="авто"></div>
         </details>
       </div>
     </div>
