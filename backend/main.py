@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import geo, jyotish, interpret, render, rectify as rectify_engine, synastry as synastry_engine
+import verify
 
 app = FastAPI(title="Jyotish Almanac")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -31,6 +32,20 @@ def _warm_city_index():
         geo._index()
     except Exception:
         pass  # falls back to online lookup on first use if this ever fails
+
+@app.on_event("startup")
+def _run_engine_selftest():
+    # Run the calculation regression suite at boot so a broken engine surfaces
+    # here rather than on someone's almanac. Never fatal: the gate blocks the
+    # narrative per-request, and /api/verify reports why.
+    r = verify.engine_selftest()
+    if r["ok"]:
+        print(f"[verify] engine self-test PASS — {r['passed']}/{r['total']} "
+              f"({r['pass_rate']*100:.0f}%)")
+    else:
+        print(f"[verify] engine self-test FAIL — {r['pass_rate']*100:.0f}% "
+              f"< {verify.THRESHOLD*100:.0f}% · error={r['error']} "
+              f"· failed={r['failed_checks']}")
 
 class BirthData(BaseModel):
     name: str = "Гость"
@@ -67,12 +82,23 @@ def _build(data: BirthData):
         raise HTTPException(400, str(e))
     chart = jyotish.compute_chart(local_dt, loc["lat"], loc["lon"], loc["tz"])
     meta = f"{d:02d}.{m:02d}.{y} · {data.time} · {data.place or loc['label']}"
-    return chart, loc, meta
+    return chart, loc, meta, local_dt
+
+def _verified(chart, loc, local_dt):
+    """Mandatory gate: calculation must be verified before any narrative is written.
+
+    Raises 409 with the exact discrepancies rather than silently narrating a
+    chart the two engines disagree about.
+    """
+    try:
+        return verify.gate(chart, local_dt, loc["lat"], loc["lon"], loc["tz"])
+    except verify.VerificationError as e:
+        raise HTTPException(status_code=409, detail=e.report)
 
 @app.post("/api/rectify")
 def rectify(data: BirthData):
     """Step 1: compute lagna and return its description for confirmation."""
-    chart, loc, meta = _build(data)
+    chart, loc, meta, _local_dt = _build(data)
     desc = interpret.rectify_description(chart)
     a = chart["ascendant"]
     return {"ascendant": a, "location": loc, "meta": meta, "description": desc,
@@ -80,12 +106,18 @@ def rectify(data: BirthData):
 
 @app.post("/api/almanac")
 def almanac(data: BirthData):
-    """Step 2: full life-path almanac as standalone HTML."""
-    chart, loc, meta = _build(data)
+    """Step 2: full life-path almanac as standalone HTML.
+
+    Order is mandatory: расчёт → верификация → нарратив. The narrative is only
+    written after both verification barriers pass.
+    """
+    chart, loc, meta, local_dt = _build(data)
+    verification = _verified(chart, loc, local_dt)     # ← blocks on failure
     narrative = interpret.generate_almanac(chart)
     html = render.render_almanac(data.name, meta, chart, narrative)
     return {"html": html, "meta": meta, "lagna_ru": chart["ascendant"]["sign_ru"],
-            "has_ai": bool(os.environ.get("ANTHROPIC_API_KEY"))}
+            "has_ai": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "verification": verification}
 
 @app.get("/api/geocode")
 def geocode(place: str = ""):
@@ -132,8 +164,10 @@ def rectify_events(data: RectifyRequest):
 @app.post("/api/synastry")
 def synastry(req: SynastryRequest):
     """Step 4: two-chart compatibility as standalone HTML."""
-    chart_a, _, meta_a = _build(req.person_a)
-    chart_b, _, meta_b = _build(req.person_b)
+    chart_a, loc_a, meta_a, dt_a = _build(req.person_a)
+    chart_b, loc_b, meta_b, dt_b = _build(req.person_b)
+    _verified(chart_a, loc_a, dt_a)                    # ← both charts must verify
+    _verified(chart_b, loc_b, dt_b)
     syn = synastry_engine.compute_synastry(chart_a, chart_b,
                                            req.person_a.name or "Партнёр A",
                                            req.person_b.name or "Партнёр B")
@@ -144,8 +178,17 @@ def synastry(req: SynastryRequest):
 
 @app.get("/api/health")
 def health():
+    engine = verify.engine_selftest()
     return {"ok": True, "ai": bool(os.environ.get("ANTHROPIC_API_KEY")),
-            "model": os.environ.get("JYOTISH_MODEL", "claude-sonnet-5")}
+            "model": os.environ.get("JYOTISH_MODEL", "claude-sonnet-5"),
+            "engine_verified": engine["ok"],
+            "engine_pass_rate": engine["pass_rate"]}
+
+@app.get("/api/verify")
+def verify_status():
+    """Full report of the engine regression suite — the `run-all` gate, as JSON."""
+    engine = verify.engine_selftest()
+    return {"threshold": verify.THRESHOLD, "engine": engine}
 
 # ---- static frontend ----
 @app.api_route("/", methods=["GET", "HEAD"])

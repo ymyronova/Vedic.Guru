@@ -18,6 +18,9 @@ npm-debug.log*
 SAMPLE_OUTPUT_*.html
 SAMPLE_SYNASTRY.html
 
+# Source archives of the project itself
+files.zip
+
 # Local Claude Code permissions (machine-specific)
 .claude/settings.local.json
 

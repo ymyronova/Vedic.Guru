@@ -16,9 +16,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
 
-# App code.
+# App code. evals/ is required at runtime: backend/verify.py gates every
+# narrative on it, so it ships in the image — not just a dev-time test asset.
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
+COPY evals/ ./evals/
 
 # The server reads PORT from the environment (hosts like Render set it).
 ENV PORT=8000

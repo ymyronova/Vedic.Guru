@@ -111,7 +111,17 @@ function birthPayload(){
 async function api(path, body){
   const r = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
   const data = await r.json();
-  if (!r.ok) throw new Error(data.detail || "Ошибка расчёта");
+  if (!r.ok){
+    // The verification gate (409) returns a structured detail object, not a
+    // string — render its message rather than "[object Object]".
+    const d = data.detail;
+    const msg = (d && typeof d === "object")
+      ? (d.message || JSON.stringify(d))
+      : (d || "Ошибка расчёта");
+    const err = new Error(msg);
+    err.detail = d;
+    throw err;
+  }
   return data;
 }
 
