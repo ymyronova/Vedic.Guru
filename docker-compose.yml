@@ -1,0 +1,13 @@
+# Run the whole service locally with one command:  docker compose up
+# Then open http://localhost:8000
+services:
+  jyotish:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Your key turns on the "living" Claude interpretation.
+      # Without it the app still runs in template mode.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - JYOTISH_MODEL=${JYOTISH_MODEL:-claude-sonnet-5}
+    restart: unless-stopped

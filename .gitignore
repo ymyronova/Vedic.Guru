@@ -1,0 +1,28 @@
+# Secrets — never commit the real one; .env.example is the template
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Sample outputs contain real personal birth data — keep them local
+SAMPLE_OUTPUT_*.html
+SAMPLE_SYNASTRY.html
+
+# Local Claude Code permissions (machine-specific)
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

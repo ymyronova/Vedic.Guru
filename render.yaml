@@ -1,0 +1,14 @@
+# Render Blueprint — lets Render set up the service automatically.
+# See DEPLOY.md for the step-by-step guide.
+services:
+  - type: web
+    name: jyotish-almanac
+    runtime: docker
+    plan: free                 # free tier; sleeps after ~15 min idle, wakes on next visit
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false            # you paste this secret in the Render dashboard (never in code)
+      - key: JYOTISH_MODEL
+        value: claude-sonnet-5

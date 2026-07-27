@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Джйотиш-Альманах</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="fatal-banner"></div>
+<div class="stars"></div>
+<main class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">Ведическая астрология · Джйотиш <span id="status-dot" title="проверка связи">●</span></div>
+    <h1>Альманах<br>жизненного пути</h1>
+    <p class="tagline">Карта, рассчитанная на настоящей эфемериде — портрет души, дуга даш и ключевые йоги. По-русски, символически.</p>
+  </header>
+
+  <div class="modes">
+    <button class="mode-btn active" data-mode="almanac">Личный альманах</button>
+    <button class="mode-btn" data-mode="compat">Совместимость</button>
+  </div>
+
+  <!-- ===== form ===== -->
+  <section class="panel" id="form-panel">
+    <h2>Данные рождения</h2>
+    <div class="field">
+      <label>Имя</label>
+      <input id="name" type="text" placeholder="Как к вам обращаться" value="">
+    </div>
+    <div class="row">
+      <div class="field"><label>Дата рождения</label><input id="date" type="date"></div>
+      <div class="field"><label>Время</label><input id="time" type="time" value="12:00"></div>
+    </div>
+    <div class="field">
+      <label>Место рождения</label>
+      <input id="place" type="text" placeholder="Город, страна — напр. Киев, Украина">
+      <span class="hint">Если города нет в базе — раскройте «координаты вручную» ниже.</span>
+    </div>
+    <details class="manual">
+      <summary>Координаты вручную</summary>
+      <div class="row">
+        <div class="field"><label>Широта</label><input id="lat" type="number" step="0.0001" placeholder="50.4501"></div>
+        <div class="field"><label>Долгота</label><input id="lon" type="number" step="0.0001" placeholder="30.5234"></div>
+      </div>
+      <div class="field"><label>Часовой пояс (IANA, необязательно)</label><input id="tz" type="text" placeholder="Europe/Kiev"></div>
+    </details>
+    <button id="go" class="cta">Рассчитать лагну →</button>
+    <p class="err" id="err"></p>
+  </section>
+
+  <!-- ===== compatibility (two people) ===== -->
+  <section class="panel hidden" id="syn-panel">
+    <h2>Совместимость двух карт</h2>
+    <p class="hint">Введите данные обоих. Считаем Аштакуту (Гуна Милан, 36 баллов), сравнение полей и игроков и наложение карт.</p>
+    <div class="two">
+      <div class="person">
+        <h3 class="pa">Партнёр A</h3>
+        <div class="field"><label>Имя</label><input id="a-name" type="text" placeholder="Имя"></div>
+        <div class="row"><div class="field"><label>Дата</label><input id="a-date" type="date"></div>
+          <div class="field"><label>Время</label><input id="a-time" type="time" value="12:00"></div></div>
+        <div class="field"><label>Место</label><input id="a-place" type="text" placeholder="Город, страна"></div>
+        <details class="manual"><summary>координаты</summary>
+          <div class="row"><div class="field"><label>Широта</label><input id="a-lat" type="number" step="0.0001"></div>
+            <div class="field"><label>Долгота</label><input id="a-lon" type="number" step="0.0001"></div></div>
+          <div class="field"><label>Пояс (IANA)</label><input id="a-tz" type="text" placeholder="Europe/Kiev"></div>
+        </details>
+      </div>
+      <div class="person">
+        <h3 class="pb">Партнёр B</h3>
+        <div class="field"><label>Имя</label><input id="b-name" type="text" placeholder="Имя"></div>
+        <div class="row"><div class="field"><label>Дата</label><input id="b-date" type="date"></div>
+          <div class="field"><label>Время</label><input id="b-time" type="time" value="12:00"></div></div>
+        <div class="field"><label>Место</label><input id="b-place" type="text" placeholder="Город, страна"></div>
+        <details class="manual"><summary>координаты</summary>
+          <div class="row"><div class="field"><label>Широта</label><input id="b-lat" type="number" step="0.0001"></div>
+            <div class="field"><label>Долгота</label><input id="b-lon" type="number" step="0.0001"></div></div>
+          <div class="field"><label>Пояс (IANA)</label><input id="b-tz" type="text" placeholder="Europe/Moscow"></div>
+        </details>
+      </div>
+    </div>
+    <button id="go-syn" class="cta">Проверить совместимость →</button>
+    <p class="err" id="syn-err"></p>
+  </section>
+
+  <!-- ===== rectification ===== -->
+  <section class="panel hidden" id="rectify-panel">
+    <div class="rc-head"><span class="badge" id="lagna-badge"></span><h2>Восходящий знак</h2></div>
+    <div class="prose" id="lagna-desc"></div>
+    <p class="confirm" id="lagna-confirm"></p>
+    <div class="actions">
+      <button id="confirm-yes" class="cta">Да, это я — собрать альманах</button>
+      <button id="confirm-no" class="ghost">Не узнаю — уточнить по событиям</button>
+    </div>
+  </section>
+
+  <!-- ===== events rectification ===== -->
+  <section class="panel hidden" id="events-panel">
+    <h2>Ректификация по событиям</h2>
+    <p class="hint">Точное время сдвигает лагну. Укажите значимые события жизни — по ним подберём восходящий знак и окно времени. Достаточно года. Чем больше событий (3–6), тем точнее.</p>
+    <label class="checkrow"><input type="checkbox" id="unknown-time"> Время рождения неизвестно (искать по всему дню)</label>
+    <div id="events-list"></div>
+    <button id="add-event" class="ghost" style="margin:6px 0 16px">+ Добавить событие</button>
+    <button id="find-lagna" class="cta">Подобрать лагну по событиям →</button>
+    <p class="err" id="events-err"></p>
+  </section>
+
+  <!-- ===== rectification results ===== -->
+  <section class="panel hidden" id="rectify-results-panel">
+    <div class="rc-head"><h2>Возможные варианты лагны</h2><span class="conf" id="conf-badge"></span></div>
+    <p class="hint" id="results-summary"></p>
+    <div id="ranked-list"></div>
+    <details class="manual" id="evidence-box" style="margin-top:8px">
+      <summary>Почему так — разбор по событиям</summary>
+      <div id="evidence-list"></div>
+    </details>
+  </section>
+
+  <!-- ===== result ===== -->
+  <section class="panel hidden" id="result-panel">
+    <div class="rc-head"><h2>Ваш альманах готов</h2>
+      <div class="result-actions">
+        <button id="download" class="ghost">Скачать HTML</button>
+        <button id="restart" class="ghost">Новая карта</button>
+      </div>
+    </div>
+    <iframe id="frame" title="almanac"></iframe>
+  </section>
+
+  <div class="loader hidden" id="loader">
+    <div class="orbit"><span></span></div>
+    <p id="loader-text">Считаю положения планет…</p>
+  </div>
+
+  <footer class="foot">
+    Лахири · цельнознаковые дома · Swiss Ephemeris · Вимшоттари.
+    Символический интерпретативный материал — не предсказание.
+  </footer>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
