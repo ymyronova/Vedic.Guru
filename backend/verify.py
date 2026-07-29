@@ -46,6 +46,20 @@ _KEYMAP = {"Su": "sun", "Mo": "moon", "Ma": "mars", "Me": "mercury",
 # manufacture a permanent false mismatch.
 _SKIP_RETRO = {"Ke"}
 
+# --- Ashtakavarga invariants (evals.json #11) --------------------------------
+# These totals are fixed for every chart regardless of birth data: they follow
+# from the benefic-point tables alone. A drift means the tables were edited.
+SAV_TOTAL = 337
+BAV_TOTALS = {"Su": 48, "Mo": 49, "Ma": 39, "Me": 54,
+              "Ju": 56, "Ve": 52, "Sa": 39}
+HOUSE_BINDU_RANGE = (18, 42)
+
+# --- Vimshopaka invariants (evals.json #13) ----------------------------------
+VARGA_COUNT = 16
+WEIGHTS_TOTAL = 20.0
+VB_RANGE = (3.0, 20.0)
+VB_TOLERANCE = 0.05
+
 
 def _norm_name(s: str) -> str:
     """Collapse transliteration differences between the two engines.
@@ -143,6 +157,98 @@ def _tz_offset_hours(local_dt: datetime, tz_name: str) -> float:
     return local_dt.replace(tzinfo=ZoneInfo(tz_name)).utcoffset().total_seconds() / 3600.0
 
 
+def _add_ashtakavarga_checks(chart: dict, add) -> None:
+    """evals.json #11 — the eight Ashtakavarga checksums.
+
+    Fixed for any chart, so a failure means the benefic-point tables drifted,
+    not that this particular birth data is unusual. Critical: bindu drive the
+    'which area of life is strong' claims in the report.
+    """
+    sav = chart.get("sav_house")
+    if not sav:
+        add("Аштакаварга рассчитана", False, "sav_house отсутствует в карте",
+            critical=True)
+        return
+
+    total = sum(sav.values())
+    add(f"Контрольная сумма САВ = {SAV_TOTAL}", total == SAV_TOTAL,
+        f"получено: {total}", critical=True)
+
+    bav = chart.get("bav") or {}
+    bad = []
+    for code, expected in BAV_TOTALS.items():
+        got = sum(bav.get(code, []))
+        if got != expected:
+            bad.append(f"{code}: {got}≠{expected}")
+    add("Контрольные суммы БАВ 7 планет", not bad,
+        ", ".join(bad) if bad else "все 7 совпали", critical=True)
+
+    lo, hi = HOUSE_BINDU_RANGE
+    out = [f"{h}-й дом: {v}" for h, v in sorted(sav.items()) if not lo <= v <= hi]
+    add(f"Бинду каждого дома в диапазоне {lo}–{hi}", not out,
+        ", ".join(out) if out else "все 12 домов в диапазоне")
+
+
+def _add_vimshopaka_checks(chart: dict, ref: dict, add) -> None:
+    """evals.json #13/#14 — Vimshopaka invariants and an independent score check.
+
+    The score check is deliberately NOT chart['vb'] against the same module fed
+    with the same positions — that would be circular, since jyotish.py already
+    delegates to vimshopaka.py. Instead the REFERENCE engine's positions are fed
+    through the module and compared against our score, so a positional
+    divergence that moves a varga boundary is caught.
+    """
+    vp = chart.get("vimshopaka")
+    if not vp:
+        add("Вимшопака рассчитана", False,
+            "модуль vimshopaka.py недоступен — балл не проверен")
+        return
+
+    v = vp.get("validation", {})
+    add(f"Сумма весов 16 варг = {WEIGHTS_TOTAL}", v.get("weights_ok") is True,
+        f"получено: {v.get('weights_total')}", critical=True)
+    add(f"Число варг = {VARGA_COUNT}", v.get("varga_count") == VARGA_COUNT,
+        f"получено: {v.get('varga_count')}")
+
+    lo, hi = VB_RANGE
+    bad = [f"{n}: {s}" for n, s in vp.get("scores", {}).items()
+           if not lo <= s <= hi]
+    add(f"Все ВБ в диапазоне {lo}–{hi}", not bad,
+        ", ".join(bad) if bad else "все 7 в диапазоне")
+
+    # Independent recomputation from the reference engine's positions.
+    try:
+        import vimshopaka as _vp_mod
+    except Exception as e:
+        add("Вимшопака: перекрёстная сверка", False, f"модуль недоступен: {e}")
+        return
+
+    ref_pos = {}
+    for code, en in _KEYMAP.items():
+        if code not in _vp_mod.PLANETS:
+            continue
+        r = ref["planets"].get(en)
+        if not r:
+            add(f"Вимшопака: позиция {en} из эталона", False, "отсутствует")
+            return
+        ref_pos[code] = (r["sign_index"], r["degree_in_sign"])
+
+    try:
+        ref_vp = _vp_mod.compute_vimshopaka(ref_pos)
+    except Exception as e:
+        add("Вимшопака по эталонным позициям", False, f"{type(e).__name__}: {e}")
+        return
+
+    mismatched = []
+    for code in _vp_mod.PLANETS:
+        ours = chart["vb"].get(code)
+        theirs = ref_vp["scores"][_vp_mod.RU[code]]
+        if ours is None or abs(ours - theirs) > VB_TOLERANCE:
+            mismatched.append(f"{_vp_mod.RU[code]}: {ours} vs {theirs}")
+    add(f"ВБ совпадает с расчётом по эталонным позициям (±{VB_TOLERANCE})",
+        not mismatched, ", ".join(mismatched) if mismatched else "все 7 совпали")
+
+
 def cross_check(chart: dict, local_dt: datetime, lat: float, lon: float,
                 tz_name: str) -> dict:
     """Barrier 2 — recompute this chart with the second engine and compare."""
@@ -190,6 +296,9 @@ def cross_check(chart: dict, local_dt: datetime, lat: float, lon: float,
     svc_md = (chart.get("current_dasha") or {}).get("lord_ru") or "—"
     ref_md = ref.get("current_mahadasha", "—")
     add("Текущая махадаша", svc_md == ref_md, f"сервис: {svc_md} · эталон: {ref_md}")
+
+    _add_ashtakavarga_checks(chart, add)
+    _add_vimshopaka_checks(chart, ref, add)
 
     passed = sum(1 for c in checks if c["passed"])
     total = len(checks)

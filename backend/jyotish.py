@@ -7,9 +7,25 @@ planetary positions, 16 divisional charts, Vimshopaka-bala, Sarvashtakavarga,
 Vimshottari dasha timeline, Jaimini karakas and the major natal yogas.
 """
 from __future__ import annotations
+import sys
 import swisseph as swe
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
+
+# Vimshopaka is delegated to evals/vimshopaka.py — the audited module with a
+# weights checksum (Σ = 20), a self-test that fails the import on corrupted
+# tables, and the Parashara 9-grade dignity scale. Adopted so the service and
+# the eval suite compute the same number instead of two similar-looking ones.
+_EVALS_DIR = Path(__file__).resolve().parent.parent / "evals"
+if str(_EVALS_DIR) not in sys.path:
+    sys.path.insert(0, str(_EVALS_DIR))
+try:
+    from vimshopaka import (compute_vimshopaka, analyse_sensitivity,
+                            RU as _VP_RU)
+    VIMSHOPAKA_AVAILABLE = True
+except Exception:                      # module missing or tables corrupted
+    VIMSHOPAKA_AVAILABLE = False
 
 SIGNS_RU = ["Овен","Телец","Близнецы","Рак","Лев","Дева","Весы","Скорпион",
             "Стрелец","Козерог","Водолей","Рыбы"]
@@ -153,14 +169,29 @@ def compute_chart(local_dt: datetime, lat: float, lon: float, tz_name: str) -> d
                  "nakshatra": NAK[asc_nak], "pada": int((asc%(360/27))//(360/108))+1}
 
     # ---- dignity grid + Vimshopaka ----
+    # The grid is ours (it drives the varga table in the report). The score comes
+    # from vimshopaka.py so it is checksum-verified and matches the eval suite.
     grid, vb = {}, {}
     for p in PLAN_ORDER:
-        grid[p]={}; tot=0
+        grid[p]={}
         for vname,vf in VARGAS.items():
             sgn=vf(lon_p[p]); dg=_dignity(p,sgn)
             grid[p][vname]={"sign": SIGNS_SHORT[sgn], "dignity": dg}
-            tot += VARGA_WEIGHTS[vname]*DIGNITY_FRAC[dg]
-        vb[p]=round(tot,2)
+
+    vimshopaka = None
+    if VIMSHOPAKA_AVAILABLE:
+        vp_pos = {p: (_sidx(lon_p[p]), _within(lon_p[p])) for p in PLAN_ORDER}
+        vimshopaka = compute_vimshopaka(vp_pos)
+        vb = {p: vimshopaka["scores"][_VP_RU[p]] for p in PLAN_ORDER}
+        # D60 spans 0°30' and carries the heaviest weight (4.0), so a planet a
+        # few arcseconds from a boundary can swing ~2 points. Surface that rather
+        # than presenting the score as exact.
+        vimshopaka["sensitivity"] = analyse_sensitivity(vp_pos)
+    else:
+        for p in PLAN_ORDER:                     # legacy fallback scale
+            tot = sum(VARGA_WEIGHTS[v]*DIGNITY_FRAC[grid[p][v]["dignity"]]
+                      for v in VARGAS)
+            vb[p] = round(tot, 2)
 
     # ---- Sarvashtakavarga ----
     pos = {k:_sidx(lon_p[k]) for k in PLAN_ORDER}; pos["As"]=lagna
@@ -224,7 +255,9 @@ def compute_chart(local_dt: datetime, lat: float, lon: float, tz_name: str) -> d
         "planets": planets,
         "grid": grid,
         "vb": vb,
+        "vimshopaka": vimshopaka,
         "sav_house": sav_house,
+        "bav": bav,                      # per-planet bindu, for checksum verification
         "sav_avg": round(sum(sav_sign)/12,2),
         "dasha": seq,
         "current_dasha": current,

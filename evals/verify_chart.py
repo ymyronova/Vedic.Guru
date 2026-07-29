@@ -25,6 +25,21 @@ except ImportError:
     print("ERROR: pyswisseph не установлен. Запустите: pip install pyswisseph --break-system-packages")
     sys.exit(1)
 
+try:
+    from ashtakavarga import (compute_ashtakavarga, format_report,
+                              AshtakavargaChecksumError)
+    ASHTAKAVARGA_AVAILABLE = True
+except ImportError:
+    ASHTAKAVARGA_AVAILABLE = False
+    print("WARN: ashtakavarga.py не найден — бинду считаться не будут.")
+
+try:
+    from vimshopaka import compute_vimshopaka, VimshopakaError
+    VIMSHOPAKA_AVAILABLE = True
+except ImportError:
+    VIMSHOPAKA_AVAILABLE = False
+    print("WARN: vimshopaka.py не найден — Вимшопака считаться не будет.")
+
 # ─── Константы ────────────────────────────────────────────────────────────────
 
 SIGNS = ['Овен','Телец','Близнецы','Рак','Лев','Дева',
@@ -187,6 +202,33 @@ def calculate_chart(date_str: str, time_str: str, lat: float, lon: float, tz_off
     ak_planet = max(grahas, key=lambda g: planets[g]['degree_in_sign'])
     dk_planet = min(grahas, key=lambda g: planets[g]['degree_in_sign'])
 
+    # ── Сарваштакаварга ──
+    ashtakavarga = None
+    if ASHTAKAVARGA_AVAILABLE:
+        code_map = {'sun': 'Su', 'moon': 'Mo', 'mars': 'Ma', 'mercury': 'Me',
+                    'jupiter': 'Ju', 'venus': 'Ve', 'saturn': 'Sa'}
+        sign_indices = {code: planets[name]['sign_index']
+                        for name, code in code_map.items()}
+        try:
+            ashtakavarga = compute_ashtakavarga(sign_indices, lagna_sign_idx)
+        except AshtakavargaChecksumError as e:
+            print(f"\n  ✗ КРИТИЧЕСКАЯ ОШИБКА АШТАКАВАРГИ:\n{e}\n")
+            raise
+
+    # ── Вимшопака-балл ──
+    vimshopaka = None
+    if VIMSHOPAKA_AVAILABLE:
+        code_map = {'sun': 'Su', 'moon': 'Mo', 'mars': 'Ma', 'mercury': 'Me',
+                    'jupiter': 'Ju', 'venus': 'Ve', 'saturn': 'Sa'}
+        vp_positions = {code: (planets[name]['sign_index'],
+                               planets[name]['degree_in_sign'])
+                        for name, code in code_map.items()}
+        try:
+            vimshopaka = compute_vimshopaka(vp_positions)
+        except VimshopakaError as e:
+            print(f"\n  ✗ КРИТИЧЕСКАЯ ОШИБКА ВИМШОПАКИ:\n{e}\n")
+            raise
+
     return {
         'meta': {
             'birth_date': date_str,
@@ -222,6 +264,8 @@ def calculate_chart(date_str: str, time_str: str, lat: float, lon: float, tz_off
         'vimshottari_dashas': dashas,
         'current_mahadasha': DASHA_NAMES.get(current_md, 'неизвестно'),
         'current_antardasha': current_antardasha or 'не определена',
+        'ashtakavarga': ashtakavarga,
+        'vimshopaka': vimshopaka,
     }
 
 # ─── Верификация против ground_truth ──────────────────────────────────────────
@@ -292,6 +336,87 @@ def verify_against_ground_truth(chart: dict, ground_truth: dict) -> dict:
             'evidence': f"Рассчитано: {chart['current_mahadasha']}",
         })
 
+    # Проверка Аштакаварги
+    av = chart.get('ashtakavarga')
+    if av:
+        v = av['validation']
+        checks.append({
+            'check': 'Контрольная сумма САВ = 337',
+            'passed': v['sav_ok'],
+            'evidence': f"Получено: {v['sav_total']}",
+        })
+        checks.append({
+            'check': 'Контрольные суммы БАВ всех 7 планет',
+            'passed': v['bav_all_ok'],
+            'evidence': ', '.join(f"{k} {x}" for k, x in av['bav_totals'].items()),
+        })
+
+        gt_bindu = ground_truth.get('sav_by_house')
+        if gt_bindu:
+            match = av['sav_by_house'] == gt_bindu
+            checks.append({
+                'check': 'Бинду по домам совпадают с эталоном',
+                'passed': match,
+                'evidence': f"Рассчитано: {av['sav_by_house']}",
+            })
+
+        gt_strong = ground_truth.get('strongest_house')
+        if gt_strong:
+            match = av['strongest_house']['house'] == gt_strong
+            checks.append({
+                'check': f'Сильнейший дом = {gt_strong}-й',
+                'passed': match,
+                'evidence': f"Рассчитано: {av['strongest_house']['house']}-й "
+                            f"({av['strongest_house']['bindu']} бинду)",
+            })
+    elif ground_truth.get('sav_by_house'):
+        checks.append({
+            'check': 'Аштакаварга рассчитана',
+            'passed': False,
+            'evidence': 'Модуль ashtakavarga.py недоступен',
+        })
+
+    # Проверка Вимшопаки
+    vp = chart.get('vimshopaka')
+    if vp:
+        v = vp['validation']
+        checks.append({
+            'check': 'Сумма весов 16 варг = 20',
+            'passed': v['weights_ok'],
+            'evidence': f"Получено: {v['weights_total']}",
+        })
+        checks.append({
+            'check': 'Все ВБ в диапазоне [3.0, 20.0]',
+            'passed': v['all_in_range'],
+            'evidence': f"Диапазон: {v['range']}",
+        })
+
+        gt_scores = ground_truth.get('vimshopaka_scores')
+        if gt_scores:
+            for pname, expected in gt_scores.items():
+                actual = vp['scores'].get(pname)
+                ok = actual is not None and abs(actual - expected) < 0.05
+                checks.append({
+                    'check': f'ВБ {pname} = {expected}',
+                    'passed': ok,
+                    'evidence': f"Рассчитано: {actual}",
+                })
+
+        gt_strong = ground_truth.get('strongest_planet')
+        if gt_strong:
+            checks.append({
+                'check': f'Сильнейшая планета = {gt_strong}',
+                'passed': vp['strongest']['planet'] == gt_strong,
+                'evidence': f"Рассчитано: {vp['strongest']['planet']} "
+                            f"({vp['strongest']['score']})",
+            })
+    elif ground_truth.get('vimshopaka_scores'):
+        checks.append({
+            'check': 'Вимшопака рассчитана',
+            'passed': False,
+            'evidence': 'Модуль vimshopaka.py недоступен',
+        })
+
     passed = sum(1 for c in checks if c['passed'])
     total = len(checks)
 
@@ -341,6 +466,35 @@ def print_chart_summary(chart: dict):
 
     print(f"\n  Текущая МД: {chart['current_mahadasha']}")
     print(f"  Текущая АД: {chart['current_antardasha']}")
+
+    av = chart.get('ashtakavarga')
+    if av:
+        print(f"\n  БИНДУ ПО ДОМАМ (Сарваштакаварга):")
+        for hh in av['houses']:
+            bar = '█' * max(1, round(hh['bindu'] / 3))
+            mark = ''
+            if hh['house'] == av['strongest_house']['house']:
+                mark = ' ★'
+            elif hh['house'] == av['weakest_house']['house']:
+                mark = ' ▼'
+            print(f"    {hh['house']:>2}  {hh['sign']:<11} {hh['bindu']:>2}  "
+                  f"{bar:<14} {hh['grade']}{mark}")
+        v = av['validation']
+        status = '✓' if v['sav_ok'] and v['bav_all_ok'] else '✗'
+        print(f"    Сумма {v['sav_total']} / {v['sav_expected']} {status}   "
+              f"среднее {v['sav_total']/12:.1f}")
+
+    vp = chart.get('vimshopaka')
+    if vp:
+        print(f"\n  ВИМШОПАКА-БАЛЛ (16 варг):")
+        for name, score, grade in vp['ranking']:
+            bar = '█' * max(1, round(score * 1.2))
+            print(f"    {name:<10} {score:>5.2f}  {bar:<25} {grade}")
+        v = vp['validation']
+        print(f"    Сумма весов {v['weights_total']}/{v['weights_expected']} "
+              f"{'✓' if v['weights_ok'] else '✗'}   "
+              f"варг {v['varga_count']}/16")
+
     print(f"{'='*60}\n")
 
 
@@ -460,6 +614,11 @@ def main():
                 'venus':   {'sign': 'Козерог', 'house': 1},
             },
             'current_mahadasha': 'Раху',
+            'sav_by_house': [24, 35, 25, 27, 31, 23, 21, 26, 34, 38, 31, 22],
+            'strongest_house': 10,
+            'vimshopaka_scores': {'Венера': 11.5, 'Марс': 11.43,
+                                  'Юпитер': 11.33, 'Сатурн': 8.72},
+            'strongest_planet': 'Венера',
         }
         result = verify_against_ground_truth(anna_chart, gt_eval1)
         print_verification_result(result)
