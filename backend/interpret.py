@@ -94,7 +94,71 @@ def rectify_description(chart: dict) -> dict:
         return {"main": f"Восходящий знак — {a['sign_ru']} {a['dms']}. (Claude недоступен: {e})",
                 "confirm": "Узнаёте ли вы себя в этом знаке?"}
 
+# --------------------------- key liveness probe ---------------------------
+# `bool(os.environ.get("ANTHROPIC_API_KEY"))` only says the variable is non-empty.
+# An expired key, a revoked key, an empty balance and a wrong model ID all look
+# identical to it — and the template fallback then tells the user to "set the key"
+# even though the key is set. This makes one cheap call and names the real cause.
+PROBE_LABELS = {
+    "ok":           "ключ работает",
+    "missing":      "ANTHROPIC_API_KEY не задан",
+    "invalid_key":  "ключ отклонён (неверный, отозванный или с лишним символом)",
+    "no_credit":    "недостаточно средств на балансе Anthropic",
+    "no_access":    "у ключа нет доступа к этой модели",
+    "bad_model":    "неизвестная модель — проверьте JYOTISH_MODEL",
+    "rate_limited": "превышен лимит запросов",
+    "unreachable":  "не удалось связаться с API",
+    "error":        "неизвестная ошибка",
+}
+
+def probe_key(timeout: float = 10.0) -> dict:
+    """One minimal request to find out whether the configured key actually works."""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return {"status": "missing", "model": MODEL, "detail": None}
+    if key != key.strip():
+        # A trailing newline or space from a copy-paste is rejected as a bad key;
+        # say so precisely instead of leaving the user to guess.
+        return {"status": "invalid_key", "model": MODEL,
+                "detail": "ключ содержит пробел или перевод строки по краям"}
+    try:
+        import anthropic
+    except Exception as e:
+        return {"status": "error", "model": MODEL, "detail": f"SDK не установлен: {e}"}
+
+    try:
+        client = anthropic.Anthropic(api_key=key, timeout=timeout, max_retries=0)
+        client.messages.create(model=MODEL, max_tokens=1,
+                               messages=[{"role": "user", "content": "ok"}])
+        return {"status": "ok", "model": MODEL, "detail": None}
+    except anthropic.AuthenticationError as e:
+        return {"status": "invalid_key", "model": MODEL, "detail": str(e)[:300]}
+    except anthropic.PermissionDeniedError as e:
+        return {"status": "no_access", "model": MODEL, "detail": str(e)[:300]}
+    except anthropic.NotFoundError as e:
+        return {"status": "bad_model", "model": MODEL, "detail": str(e)[:300]}
+    except anthropic.RateLimitError as e:
+        return {"status": "rate_limited", "model": MODEL, "detail": str(e)[:300]}
+    except anthropic.BadRequestError as e:
+        msg = str(e)
+        low = msg.lower()
+        # Anthropic reports an exhausted balance as a 400, not a 402.
+        st = "no_credit" if ("credit" in low or "balance" in low) else "error"
+        return {"status": st, "model": MODEL, "detail": msg[:300]}
+    except anthropic.APIConnectionError as e:
+        return {"status": "unreachable", "model": MODEL, "detail": str(e)[:300]}
+    except Exception as e:
+        return {"status": "error", "model": MODEL, "detail": f"{type(e).__name__}: {e}"[:300]}
+
+
 # --------------------------- template fallback ---------------------------
+def _why_template() -> str:
+    """Why the template is showing. 'Set the key' is wrong when the key IS set."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return "Задайте ANTHROPIC_API_KEY для полного текста."
+    return ("Ключ задан, но обращение к Claude не прошло — "
+            "причина указана в подвале страницы и в /api/ai.")
+
 def _fallback(chart: dict) -> dict:
     vb = chart["vb"]; strongest = max(vb, key=vb.get)
     from jyotish import PL_RU
@@ -107,14 +171,14 @@ def _fallback(chart: dict) -> dict:
                    f"{kk['Атмакарака']['pl_ru']}, направление реализации (Каракамса) — {chart['karakamsa']}. "
                    f"Сильнейший инструмент карты — {PL_RU[strongest]} ({vb[strongest]}/20). "
                    f"Богатейшее поле — {best_house}-й дом ({sav[best_house]} бинду), зона роста — "
-                   f"{worst_house}-й дом ({sav[worst_house]}). Задайте ANTHROPIC_API_KEY для полного текста."),
+                   f"{worst_house}-й дом ({sav[worst_house]}). " + _why_template()),
       "shodashavarga": f"Рабочий инструмент — {PL_RU[strongest]} ({vb[strongest]}/20). "
                        f"Сильные дома: см. бинду ≥30; уязвимые: <25. (шаблон)",
       "yogas": yoga_txt or "Явных крупных натальных йог не обнаружено. (шаблон)",
       "dasha": (f"Текущая махадаша: {chart['current_dasha']['lord_ru']}. "
                 "Полный разбор дуги — при подключённом Claude. (шаблон)"),
       "integral": ("Тип судьбы и формула жизни рассчитываются на основе связки поле×игрок. "
-                   "Подключите ANTHROPIC_API_KEY для развёрнутого синтеза. (шаблон)"),
+                   + _why_template() + " (шаблон)"),
       "planets": "Разбор по каждой планете доступен при подключённом Claude. (шаблон)",
     }
 

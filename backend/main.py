@@ -34,6 +34,14 @@ def _warm_city_index():
         pass  # falls back to online lookup on first use if this ever fails
 
 @app.on_event("startup")
+def _probe_ai_key():
+    # Surface a broken key in the boot log instead of on someone's almanac.
+    r = _ai_status(refresh=True)
+    label = interpret.PROBE_LABELS.get(r["status"], r["status"])
+    print(f"[ai] key probe: {r['status']} — {label}"
+          + (f" · {r['detail']}" if r.get("detail") else ""))
+
+@app.on_event("startup")
 def _run_engine_selftest():
     # Run the calculation regression suite at boot so a broken engine surfaces
     # here rather than on someone's almanac. Never fatal: the gate blocks the
@@ -176,10 +184,32 @@ def synastry(req: SynastryRequest):
     return {"html": html, "ashtakoota": syn["ashtakoota"]["total"],
             "has_ai": bool(os.environ.get("ANTHROPIC_API_KEY"))}
 
+_AI_STATUS: dict | None = None
+
+def _ai_status(refresh: bool = False) -> dict:
+    """Cached result of the key probe. Cached because it costs a real API call."""
+    global _AI_STATUS
+    if _AI_STATUS is None or refresh:
+        _AI_STATUS = interpret.probe_key()
+        _AI_STATUS["label"] = interpret.PROBE_LABELS.get(
+            _AI_STATUS["status"], _AI_STATUS["status"])
+    return _AI_STATUS
+
+@app.get("/api/ai")
+def ai_status(refresh: bool = False):
+    """Does the configured key actually work? Pass ?refresh=1 to re-probe."""
+    return _ai_status(refresh=refresh)
+
 @app.get("/api/health")
 def health():
     engine = verify.engine_selftest()
-    return {"ok": True, "ai": bool(os.environ.get("ANTHROPIC_API_KEY")),
+    ai = _ai_status()
+    return {"ok": True,
+            # kept as a bool for backwards compatibility: true means "usable",
+            # not merely "the env var is set" — that distinction was the bug.
+            "ai": ai["status"] == "ok",
+            "ai_status": ai["status"],
+            "ai_detail": ai.get("label"),
             "model": os.environ.get("JYOTISH_MODEL", "claude-sonnet-5"),
             "engine_verified": engine["ok"],
             "engine_pass_rate": engine["pass_rate"]}

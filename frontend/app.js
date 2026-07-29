@@ -15,7 +15,14 @@ window.addEventListener("unhandledrejection", e => showFatal("promise: " + (e.re
   try {
     const r = await fetch("/api/health");
     const d = await r.json();
-    if (dot){ dot.classList.add("ok"); dot.title = "сервер на связи" + (d.ai ? " · тексты Claude включены" : " · шаблонный режим (нет ключа)"); }
+    if (dot){
+      dot.classList.add(d.ai ? "ok" : "warn");
+      // ai_detail names the actual cause (bad key / no credit / wrong model);
+      // the old tooltip always said "нет ключа", which was usually wrong.
+      dot.title = d.ai
+        ? "сервер на связи · тексты Claude включены"
+        : "сервер на связи · шаблонный режим — " + (d.ai_detail || "Claude недоступен");
+    }
     console.info("health:", d);
   } catch (e) {
     if (dot){ dot.classList.add("bad"); dot.title = "нет связи с сервером"; }
