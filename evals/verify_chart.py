@@ -31,7 +31,10 @@ try:
     ASHTAKAVARGA_AVAILABLE = True
 except ImportError:
     ASHTAKAVARGA_AVAILABLE = False
-    print("WARN: ashtakavarga.py не найден — бинду считаться не будут.")
+    print("WARN: ashtakavarga.py не найден — независимый пересчёт бинду недоступен, "
+          "eval #12 пропускается. На бинду в самом отчёте это НЕ влияет: их считает "
+          "backend/jyotish.py, а контрольные суммы (САВ=337 и семь БАВ) проверяются "
+          "рантайм-гейтом на каждой карте.")
 
 try:
     from vimshopaka import compute_vimshopaka, VimshopakaError
