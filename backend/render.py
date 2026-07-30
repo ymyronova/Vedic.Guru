@@ -1,9 +1,20 @@
 # -*- coding: utf-8 -*-
 """Assemble the computed chart + SVGs + narrative into the full styled almanac HTML."""
 import html as _h
+import re
 import theme
 from charts import natal_svg, vimshopaka_svg, sav_svg, bubble_svg, dignity_grid_html, _q
 from jyotish import PL_RU
+
+# Tone-of-voice rule: every claim is written in plain language, followed by the
+# chart parameter it rests on in parentheses. Setting those parentheses in the
+# quiet .jy style keeps the sentence readable for someone who knows no jyotish,
+# while leaving the term legible for cross-checking against the tables.
+_JY_TERM = re.compile(r"\(([^()]{2,140})\)")
+
+def _prose(text: str) -> str:
+    """Escape narrative text, then style parenthesised jyotish terms."""
+    return _JY_TERM.sub(r'<span class="jy">(\1)</span>', _h.escape(text or ""))
 
 CSS = """
 :root{--paper:%(PAPER)s;--panel:%(PANEL)s;--panel2:%(PANEL2)s;
@@ -164,7 +175,7 @@ def render_almanac(name, birth_meta, chart, narrative):
       <div class="chartwrap">{natal_svg(chart)}</div></div>""")
     # 1 portrait
     parts.append(f"""<section><div class="sec-head"><div class="sec-num">1</div><h2>Портрет одной нитью</h2></div>
-      <div class="thread"><p class="prose lead" style="margin:0">{esc(narrative.get('portrait',''))}</p></div></section>""")
+      <div class="thread"><p class="prose lead" style="margin:0">{_prose(narrative.get('portrait',''))}</p></div></section>""")
     # 2 shodashavarga
     parts.append(f"""<section><div class="sec-head"><div class="sec-num">2</div><h2>Сила дробных карт</h2></div>
       <h3 style="color:var(--accent);font-size:21px;margin:6px 0 4px">Сетка достоинств по 16 варгам</h3>
@@ -172,10 +183,10 @@ def render_almanac(name, birth_meta, chart, narrative):
       <p class="legend"><b>Э</b> экзальтация · <b>С</b> свой · <b>д</b> друг · <b>н</b> нейтрал · <b>в</b> враг · <b>П</b> падение</p>
       <div class="card">{vimshopaka_svg(chart)}<p class="legend" style="text-align:center">Вимшопака-балл (из 20)</p></div>
       <div class="card">{sav_svg(chart)}<p class="legend" style="text-align:center">Бинду по домам · ось X — номер дома</p></div>
-      <p class="prose">{esc(narrative.get('shodashavarga',''))}</p></section>""")
+      <p class="prose">{_prose(narrative.get('shodashavarga',''))}</p></section>""")
     # 3 yogas
     parts.append(f"""<section><div class="sec-head"><div class="sec-num">3</div><h2>Ключевые йоги</h2></div>
-      <p class="prose">{esc(narrative.get('yogas',''))}</p>{_yoga_cards(chart)}</section>""")
+      <p class="prose">{_prose(narrative.get('yogas',''))}</p>{_yoga_cards(chart)}</section>""")
     # 4 dasha
     ad=next((x for x in chart["antardashas"] if x["current"]),None)
     ad_line=(f"Сейчас: <b>{chart['current_dasha']['lord_ru']} · {ad['lord_ru']}</b> "
@@ -184,17 +195,17 @@ def render_almanac(name, birth_meta, chart, narrative):
       <div class="tablewrap"><table><thead><tr><th>Махадаша</th><th class="mono">Годы</th><th class="mono">Возраст</th></tr></thead>
       <tbody>{_dasha_rows(chart)}</tbody></table></div>
       <div class="callout">{ad_line}</div>
-      <p class="prose">{esc(narrative.get('dasha',''))}</p></section>""")
+      <p class="prose">{_prose(narrative.get('dasha',''))}</p></section>""")
     # 5 integral
     parts.append(f"""<section><div class="sec-head"><div class="sec-num">5</div><h2>Интегральная карта судьбы</h2></div>
       <p>Каждый дом — это <b>поле</b> (бинду) и <b>игрок</b> (Вимшопака держателя). Ось X — сила поля, ось Y — сила игрока.</p>
       <div class="card" style="padding:14px">{bubble}</div>
       <div class="tablewrap"><table><thead><tr><th>Дом · сфера</th><th class="mono">Поле</th><th class="mono">Игрок</th><th>Тип</th></tr></thead>
       <tbody>{_section5_table(chart,player)}</tbody></table></div>
-      <div class="card"><p class="prose" style="margin:0">{esc(narrative.get('integral',''))}</p></div></section>""")
+      <div class="card"><p class="prose" style="margin:0">{_prose(narrative.get('integral',''))}</p></div></section>""")
     # 6 planets
     parts.append(f"""<section><div class="sec-head"><div class="sec-num">6</div><h2>Как держать каждую планету в высшем состоянии</h2></div>
-      <p class="prose">{esc(narrative.get('planets',''))}</p></section>""")
+      <p class="prose">{_prose(narrative.get('planets',''))}</p></section>""")
     note = narrative.get("_note","")
     parts.append(f"""<div class="foot">ДЖЙОТИШ-АЛЬМАНАХ · {esc(name)}<br>
       Лахири (сидерик) · цельнознаковые дома · Вимшопака по Шодашаварге · SAV · Вимшоттари · Swiss Ephemeris<br>
@@ -294,7 +305,7 @@ def render_synastry(syn, narrative):
     p.append(f"""<section><div class="sec-head"><div class="sec-num">4</div><h2>Интерсинастрия — наложение карт</h2></div>
       <div class="card"><p style="margin:0 0 6px;color:var(--accent)"><b>Планеты {nb} на домах {na}</b></p>{_overlay_html(syn['overlay_ab'], na, nb)}</div>
       <div class="card"><p style="margin:0 0 6px;color:#2e567c"><b>Планеты {na} на домах {nb}</b></p>{_overlay_html(syn['overlay_ba'], nb, na)}</div>
-      <p class="prose">{esc(narrative.get('intersynastry',''))}</p>
+      <p class="prose">{_prose(narrative.get('intersynastry',''))}</p>
       <p class="legend">Даракарака (тема партнёра) — {na}: {syn['dara_a']['pl_ru']} · {nb}: {syn['dara_b']['pl_ru']}</p></section>""")
     # 5 contrasts
     def houses_tags(hs):
@@ -303,11 +314,11 @@ def render_synastry(syn, narrative):
       <div class="card"><p style="margin:0 0 4px;color:#2f6340"><b>Дополнения</b> (один силён — другой опирается)</p><div class="tagset">{houses_tags(syn['complements'])}</div>
       <p style="margin:10px 0 4px;color:var(--blue)"><b>Общая сила</b> (оба сильны — синергия/соперничество)</p><div class="tagset">{houses_tags(syn['shared'])}</div>
       <p style="margin:10px 0 4px;color:#8c3838"><b>Зеркальная уязвимость</b> (оба слабы — беречь вместе)</p><div class="tagset">{houses_tags(syn['mirrors'])}</div></div>
-      <p class="prose">{esc(narrative.get('contrasts',''))}</p></section>""")
+      <p class="prose">{_prose(narrative.get('contrasts',''))}</p></section>""")
     # 6 formula
     note=narrative.get("_note","")
     p.append(f"""<section><div class="sec-head"><div class="sec-num">6</div><h2>Формула пары</h2></div>
-      <div class="thread"><p class="prose" style="margin:0">{esc(narrative.get('formula',''))}</p></div></section>
+      <div class="thread"><p class="prose" style="margin:0">{_prose(narrative.get('formula',''))}</p></div></section>
       <div class="foot">ДЖЙОТИШ · Совместимость · {na} × {nb}<br>
       Аштакута (Гуна Милан) 36 · SAV · Вимшопака · интерсинастрия · Swiss Ephemeris<br>
       Символический интерпретативный материал, не суждение о людях. {esc(note)}</div></div></body></html>""")

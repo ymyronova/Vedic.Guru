@@ -7,6 +7,7 @@ Then open http://localhost:8000
 """
 from __future__ import annotations
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
@@ -124,7 +125,8 @@ def almanac(data: BirthData):
     narrative = interpret.generate_almanac(chart)
     html = render.render_almanac(data.name, meta, chart, narrative)
     return {"html": html, "meta": meta, "lagna_ru": chart["ascendant"]["sign_ru"],
-            "has_ai": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            # Reports whether Claude is usable, not merely whether a key is set.
+            "has_ai": _ai_status()["status"] == "ok",
             "verification": verification}
 
 @app.get("/api/geocode")
@@ -195,7 +197,7 @@ def _ai_status(refresh: bool = False) -> dict:
             _AI_STATUS["status"], _AI_STATUS["status"])
     return _AI_STATUS
 
-def _narrative_probe() -> dict:
+def _narrative_probe(sample: int = 0) -> dict:
     """Run the REAL narrative path once, on the reference chart.
 
     The 1-token key probe proves auth and credit only. It cannot catch the
@@ -212,26 +214,57 @@ def _narrative_probe() -> dict:
         lengths = {k: len(str(nar.get(k, ""))) for k in interpret.ALMANAC_KEYS}
         templated = [k for k in interpret.ALMANAC_KEYS
                      if "(шаблон)" in str(nar.get(k, ""))]
-        return {"ok": nar.get("_note") is None and not templated,
-                "note": nar.get("_note"),
-                "templated_sections": templated,
-                "section_lengths": lengths,
-                "max_tokens": interpret.NARRATIVE_MAX_TOKENS,
-                "effort": interpret.EFFORT}
+        out = {"ok": nar.get("_note") is None and not templated,
+               "note": nar.get("_note"),
+               "templated_sections": templated,
+               "section_lengths": lengths,
+               "tone": _tone_report(nar),
+               "max_tokens": interpret.NARRATIVE_MAX_TOKENS,
+               "effort": interpret.EFFORT}
+        if sample:
+            out["sample"] = {k: str(nar.get(k, ""))[:sample]
+                             for k in interpret.ALMANAC_KEYS}
+        return out
     except Exception as e:
         return {"ok": False, "note": f"{type(e).__name__}: {e}"}
 
+
+_SENTENCE = re.compile(r"[^.!?…]+[.!?…]")
+_PAREN = re.compile(r"\([^()]{2,140}\)")
+
+def _tone_report(nar: dict) -> dict:
+    """How well the narrative follows the tone rule.
+
+    The rule: a plain-language claim, then the chart parameter it rests on in
+    parentheses. So a section that follows it has roughly one parenthetical per
+    sentence or two; a section with none has reverted to unsourced assertion.
+    """
+    per_section, total_s, total_p = {}, 0, 0
+    for k in interpret.ALMANAC_KEYS:
+        text = str(nar.get(k, ""))
+        s = len(_SENTENCE.findall(text)) or (1 if text.strip() else 0)
+        p = len(_PAREN.findall(text))
+        per_section[k] = {"sentences": s, "with_term": p,
+                          "ratio": round(p / s, 2) if s else 0.0}
+        total_s += s; total_p += p
+    return {"per_section": per_section,
+            "sentences": total_s, "terms": total_p,
+            "terms_per_sentence": round(total_p / total_s, 2) if total_s else 0.0,
+            "sections_without_terms": [k for k, v in per_section.items()
+                                       if v["with_term"] == 0]}
+
 @app.get("/api/ai")
-def ai_status(refresh: bool = False, deep: bool = False):
+def ai_status(refresh: bool = False, deep: bool = False, sample: int = 0):
     """Does the configured key actually work?
 
     ?refresh=1 re-runs the cheap key probe. ?deep=1 additionally generates a
     real narrative — slower and billed, but it is the only check that catches
-    truncation and parse failures.
+    truncation and parse failures. ?sample=N includes the first N characters of
+    each section, for eyeballing tone.
     """
     out = dict(_ai_status(refresh=refresh))
     if deep:
-        out["narrative"] = _narrative_probe()
+        out["narrative"] = _narrative_probe(sample=max(0, min(sample, 2000)))
     return out
 
 @app.get("/api/health")
