@@ -173,6 +173,9 @@ function applyStep(){
   const step = NAV.stack[NAV.i];
   if (!step) return;
   showOnly(step.panel);
+  // The result step reads as a document and needs the width; the form steps do
+  // not. Driven from here so it stays correct on back/forward too.
+  document.body.classList.toggle("wide", step.panel === "result-panel");
   const restore = RESTORE[step.panel];
   if (restore && step.data){
     NAV.restoring = true;
