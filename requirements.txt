@@ -5,5 +5,5 @@ pyswisseph>=2.10
 timezonefinder>=6.5
 tzdata>=2024.1
 geopy>=2.4
-anthropic>=0.40
+anthropic>=0.69          # output_config (structured outputs) + adaptive thinking
 geonamescache>=2.0

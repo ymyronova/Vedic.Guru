@@ -52,6 +52,76 @@ _INSTRUCT = """На основе фактов карты напиши JSON ст�
  "planets": "Раздел 6 — для каждой из 7 планет короткий блок из 3–4 фраз: состояние в карте, высшее состояние (что активирует лучшее), раджа-активатор, чего избегать. Верни как один связный текст с подзаголовками-планетами."
 }"""
 
+ALMANAC_KEYS = ("portrait", "shodashavarga", "yogas", "dasha", "integral", "planets")
+
+# Structured outputs: the response is constrained to this schema, so it cannot
+# come back as prose, as a code-fenced block, or as JSON with an extra key.
+# Previously the model was merely *asked* for JSON and the text was hand-parsed
+# after stripping ``` fences — any deviation raised and fell back to a template.
+_ALMANAC_SCHEMA = {
+    "type": "object",
+    "properties": {k: {"type": "string"} for k in ALMANAC_KEYS},
+    "required": list(ALMANAC_KEYS),
+    "additionalProperties": False,
+}
+
+# max_tokens caps thinking AND response text together. Six multi-paragraph
+# sections shared a 4000-token budget with adaptive thinking — which the model
+# turns on by default when `thinking` is omitted — so the JSON was truncated
+# mid-string and every almanac silently fell back to the template.
+NARRATIVE_MAX_TOKENS = int(os.environ.get("JYOTISH_MAX_TOKENS", "16000"))
+EFFORT = os.environ.get("JYOTISH_EFFORT", "medium")
+
+
+class NarrativeError(RuntimeError):
+    """Claude ran but did not return usable text — kept distinct from auth failures."""
+
+
+def _looks_like_unsupported_param(e: Exception) -> bool:
+    """True when the configured model rejects a modern request field.
+
+    JYOTISH_MODEL is operator-configurable, so someone may point it at a model
+    without structured outputs or adaptive thinking. Retry plainly rather than
+    dropping to a template.
+    """
+    m = str(e).lower()
+    return any(t in m for t in ("output_config", "output_format", "thinking",
+                                "json_schema", "effort", "unexpected keyword"))
+
+
+def _ask(client, prompt: str, max_tokens: int, schema: dict | None = None):
+    """One streamed request. Streaming keeps long generations off the HTTP timeout."""
+    kwargs = dict(model=MODEL, max_tokens=max_tokens, system=SYSTEM,
+                  messages=[{"role": "user", "content": prompt}])
+    oc: dict = {"effort": EFFORT}
+    if schema is not None:
+        oc["format"] = {"type": "json_schema", "schema": schema}
+    try:
+        with client.messages.stream(thinking={"type": "adaptive"},
+                                    output_config=oc, **kwargs) as s:
+            return s.get_final_message(), True
+    except Exception as e:
+        if not _looks_like_unsupported_param(e):
+            raise
+        with client.messages.stream(**kwargs) as s:      # bare, older-model path
+            return s.get_final_message(), False
+
+
+def _text_of(msg) -> str:
+    if getattr(msg, "stop_reason", None) == "refusal":
+        raise NarrativeError("модель отклонила запрос (stop_reason=refusal)")
+    text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+    if getattr(msg, "stop_reason", None) == "max_tokens":
+        # Distinguish "ran out of room" from "could not reach Claude" — the old
+        # code reported both as «Claude недоступен».
+        raise NarrativeError(
+            f"ответ обрезан по max_tokens ({NARRATIVE_MAX_TOKENS}); "
+            f"поднимите JYOTISH_MAX_TOKENS или понизьте JYOTISH_EFFORT")
+    if not text.strip():
+        raise NarrativeError("пустой ответ модели")
+    return text
+
+
 def generate_almanac(chart: dict) -> dict:
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
@@ -59,15 +129,20 @@ def generate_almanac(chart: dict) -> dict:
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=key)
-        msg = client.messages.create(
-            model=MODEL, max_tokens=4000, system=SYSTEM,
-            messages=[{"role":"user","content": _facts(chart) + "\n\n" + _INSTRUCT}],
-        )
-        text = "".join(b.text for b in msg.content if getattr(b,"type",None)=="text")
-        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        return json.loads(text)
+        msg, structured = _ask(client, _facts(chart) + "\n\n" + _INSTRUCT,
+                               NARRATIVE_MAX_TOKENS, _ALMANAC_SCHEMA)
+        text = _text_of(msg)
+        if not structured:      # older model: still tolerate a fenced block
+            text = text.strip().removeprefix("```json").removeprefix("```") \
+                       .removesuffix("```").strip()
+        data = json.loads(text)
+        missing = [k for k in ALMANAC_KEYS if not str(data.get(k, "")).strip()]
+        if missing:
+            raise NarrativeError(f"в ответе нет разделов: {', '.join(missing)}")
+        return data
     except Exception as e:
-        out = _fallback(chart); out["_note"] = f"Claude недоступен ({e}); показан шаблон."
+        out = _fallback(chart)
+        out["_note"] = f"Claude недоступен ({type(e).__name__}: {e}); показан шаблон."
         return out
 
 def rectify_description(chart: dict) -> dict:
@@ -86,12 +161,12 @@ def rectify_description(chart: dict) -> dict:
                   "Опиши эту лагну развёрнуто и конкретно (внешность, темперамент, паттерн поведения, "
                   "отношение к жизни), затем для контраста кратко опиши предыдущий и следующий знаки зодиака "
                   "как восходящие. Заверши вопросом, узнаёт ли человек себя. Пиши на русском.")
-        msg = client.messages.create(model=MODEL, max_tokens=1500, system=SYSTEM,
-                                      messages=[{"role":"user","content":prompt}])
-        text = "".join(b.text for b in msg.content if getattr(b,"type",None)=="text")
-        return {"main": text, "confirm": "Узнаёте ли вы себя в этом описании?"}
+        # 1500 was not enough once thinking started sharing the budget.
+        msg, _ = _ask(client, prompt, int(os.environ.get("JYOTISH_LAGNA_TOKENS", "6000")))
+        return {"main": _text_of(msg), "confirm": "Узнаёте ли вы себя в этом описании?"}
     except Exception as e:
-        return {"main": f"Восходящий знак — {a['sign_ru']} {a['dms']}. (Claude недоступен: {e})",
+        return {"main": f"Восходящий знак — {a['sign_ru']} {a['dms']}. "
+                        f"(Claude недоступен: {type(e).__name__}: {e})",
                 "confirm": "Узнаёте ли вы себя в этом знаке?"}
 
 # --------------------------- key liveness probe ---------------------------
@@ -192,6 +267,14 @@ _SYN_INSTRUCT = """На основе данных совместимости д�
  "formula": "1 абзац: тип отношений, главный дар пары и главная точка роста. Тепло, без суждений о людях."
 }"""
 
+SYN_KEYS = ("intersynastry", "contrasts", "formula")
+_SYN_SCHEMA = {
+    "type": "object",
+    "properties": {k: {"type": "string"} for k in SYN_KEYS},
+    "required": list(SYN_KEYS),
+    "additionalProperties": False,
+}
+
 def _syn_facts(syn: dict) -> str:
     ak = syn["ashtakoota"]
     lines = [f"Аштакута (Гуна Милан): {ak['total']} из 36."]
@@ -221,13 +304,28 @@ def generate_synastry(syn: dict) -> dict:
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=key)
-        msg = client.messages.create(model=MODEL, max_tokens=2500, system=SYSTEM,
-                                      messages=[{"role":"user","content": _syn_facts(syn) + "\n\n" + _SYN_INSTRUCT}])
-        text = "".join(b.text for b in msg.content if getattr(b,"type",None)=="text")
-        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        return json.loads(text)
+        msg, structured = _ask(client, _syn_facts(syn) + "\n\n" + _SYN_INSTRUCT,
+                               NARRATIVE_MAX_TOKENS, _SYN_SCHEMA)
+        text = _text_of(msg)
+        if not structured:
+            text = text.strip().removeprefix("```json").removeprefix("```") \
+                       .removesuffix("```").strip()
+        data = json.loads(text)
+        missing = [k for k in SYN_KEYS if not str(data.get(k, "")).strip()]
+        if missing:
+            raise NarrativeError(f"в ответе нет разделов: {', '.join(missing)}")
+        return data
     except Exception as e:
-        out = generate_synastry.__wrapped__(syn) if hasattr(generate_synastry,"__wrapped__") else {
-            "intersynastry":"(шаблон)","contrasts":"(шаблон)","formula":f"Аштакута {syn['ashtakoota']['total']}/36."}
-        out["_note"] = f"Claude недоступен ({e}); показан шаблон."
+        ak = syn["ashtakoota"]
+        # The old handler called generate_synastry.__wrapped__, which never
+        # exists — so the fallback itself raised AttributeError on any failure.
+        out = {
+            "intersynastry": "Планеты B на домах A: " +
+                (", ".join(f"{o['planet']}→{o['house']}-й" for o in syn['overlay_ab']) or "нет")
+                + ". (шаблон)",
+            "contrasts": f"Дополнения: дома {syn['complements'] or '—'}; "
+                         f"зеркальные слабости: {syn['mirrors'] or '—'}. (шаблон)",
+            "formula": f"Аштакута {ak['total']}/36. (шаблон)",
+        }
+        out["_note"] = f"Claude недоступен ({type(e).__name__}: {e}); показан шаблон."
         return out

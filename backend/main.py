@@ -195,10 +195,44 @@ def _ai_status(refresh: bool = False) -> dict:
             _AI_STATUS["status"], _AI_STATUS["status"])
     return _AI_STATUS
 
+def _narrative_probe() -> dict:
+    """Run the REAL narrative path once, on the reference chart.
+
+    The 1-token key probe proves auth and credit only. It cannot catch the
+    failures that actually silence the narrative — a response truncated by
+    max_tokens, a rejected schema, or JSON that will not parse. This exercises
+    the same code path an almanac uses and reports what came back.
+    """
+    try:
+        ref = verify._reference_case()
+        local = datetime.strptime(f"{ref['date']} {ref['time']}", "%Y-%m-%d %H:%M")
+        chart = jyotish.compute_chart(local, float(ref["lat"]), float(ref["lon"]),
+                                      ref.get("tz_name") or "UTC")
+        nar = interpret.generate_almanac(chart)
+        lengths = {k: len(str(nar.get(k, ""))) for k in interpret.ALMANAC_KEYS}
+        templated = [k for k in interpret.ALMANAC_KEYS
+                     if "(шаблон)" in str(nar.get(k, ""))]
+        return {"ok": nar.get("_note") is None and not templated,
+                "note": nar.get("_note"),
+                "templated_sections": templated,
+                "section_lengths": lengths,
+                "max_tokens": interpret.NARRATIVE_MAX_TOKENS,
+                "effort": interpret.EFFORT}
+    except Exception as e:
+        return {"ok": False, "note": f"{type(e).__name__}: {e}"}
+
 @app.get("/api/ai")
-def ai_status(refresh: bool = False):
-    """Does the configured key actually work? Pass ?refresh=1 to re-probe."""
-    return _ai_status(refresh=refresh)
+def ai_status(refresh: bool = False, deep: bool = False):
+    """Does the configured key actually work?
+
+    ?refresh=1 re-runs the cheap key probe. ?deep=1 additionally generates a
+    real narrative — slower and billed, but it is the only check that catches
+    truncation and parse failures.
+    """
+    out = dict(_ai_status(refresh=refresh))
+    if deep:
+        out["narrative"] = _narrative_probe()
+    return out
 
 @app.get("/api/health")
 def health():
