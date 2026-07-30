@@ -129,10 +129,15 @@
   <section class="panel hidden" id="result-panel">
     <div class="rc-head"><h2>Ваш альманах готов</h2>
       <div class="result-actions">
-        <button id="download" class="ghost">Скачать HTML</button>
+        <button id="download" class="ghost">Скачать PDF</button>
+        <button id="download-html" class="ghost" title="Исходный HTML — для архива">HTML</button>
         <button id="restart" class="ghost">Новая карта</button>
       </div>
     </div>
+    <p class="hint print-hint hidden" id="print-hint">
+      В открывшемся окне печати выберите принтер <b>«Сохранить как PDF»</b>
+      (Destination → Save as PDF). Разметка A4 и разрывы страниц уже заданы в документе.
+    </p>
     <iframe id="frame" title="almanac"></iframe>
   </section>
 

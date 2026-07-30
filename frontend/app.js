@@ -447,7 +447,38 @@ $("restart").addEventListener("click", () => {
   navReset(compat ? "syn-panel" : "form-panel");
 });
 
+// PDF through the browser's own print engine. The almanac already carries
+// @page A4, print-color-adjust and full page-break rules, ported from the
+// reference document — which was itself produced by printing to PDF. So this
+// gives exact pagination, selectable text, embedded fonts and a small file.
+//
+// Deliberately not a server-side renderer: headless Chromium needs ~300–500 MB
+// and would not fit the free tier's 512 MB alongside the city index, and
+// WeasyPrint — the light alternative — supports flexbox only partially and CSS
+// grid poorly, which this layout uses in the section headers, planet blocks and
+// two-column cards. A weaker second renderer would produce a worse PDF than the
+// one Chrome already makes from these rules.
 $("download").addEventListener("click", () => {
+  const f = $("frame");
+  if (!f || !lastAlmanacHtml){ alert("Альманах ещё не готов."); return; }
+  $("print-hint").classList.remove("hidden");
+  try{
+    // srcdoc is same-origin, so the frame's own print() is reachable and prints
+    // the document alone — not the surrounding app.
+    f.contentWindow.focus();
+    f.contentWindow.print();
+  }catch(e){
+    // Some browsers refuse print() on a srcdoc frame. Open the document in its
+    // own tab, where Ctrl+P works normally.
+    const w = window.open("", "_blank");
+    if (w){ w.document.write(lastAlmanacHtml); w.document.close(); w.focus(); }
+    else alert("Не удалось открыть окно печати: " + e.message);
+  }
+});
+
+// The HTML stays available as the archivable original — it is self-contained
+// (inline CSS, inline SVG, no external fonts), so it opens anywhere, offline.
+$("download-html").addEventListener("click", () => {
   if (!lastAlmanacHtml) return;
   const blob = new Blob([lastAlmanacHtml], {type:"text/html"});
   const a = document.createElement("a");
