@@ -177,7 +177,8 @@ def rectify_description(chart: dict) -> dict:
     """Step-1 lagna description + two neighbours. Uses Claude if available, else template."""
     a = chart["ascendant"]; key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
-        return {"main": f"Восходящий знак — {a['sign_ru']} ({a['dms']}), накшатра {a['nakshatra']}. "
+        return {"_template": True,
+                "main": f"Восходящий знак — {a['sign_ru']} ({a['dms']}), накшатра {a['nakshatra']}. "
                         "Подключите ANTHROPIC_API_KEY для развёрнутого описания лагны и соседних знаков.",
                 "confirm": "Узнаёте ли вы себя в этом знаке?"}
     try:
@@ -193,7 +194,8 @@ def rectify_description(chart: dict) -> dict:
         msg, _ = _ask(client, prompt, int(os.environ.get("JYOTISH_LAGNA_TOKENS", "6000")))
         return {"main": _text_of(msg), "confirm": "Узнаёте ли вы себя в этом описании?"}
     except Exception as e:
-        return {"main": f"Восходящий знак — {a['sign_ru']} {a['dms']}. "
+        return {"_template": True,
+                "main": f"Восходящий знак — {a['sign_ru']} {a['dms']}. "
                         f"(Claude недоступен: {type(e).__name__}: {e})",
                 "confirm": "Узнаёте ли вы себя в этом знаке?"}
 
@@ -270,6 +272,11 @@ def _fallback(chart: dict) -> dict:
     a = chart["ascendant"]; kk = chart["karakas"]
     yoga_txt = " ".join(f"{y['name']}: {y['mech']} " for y in chart["yogas"])
     return {
+      # Marks this as template output. The cache checks it: without an explicit
+      # flag, the no-key path returns a fallback carrying no _note, which the
+      # cache happily stored — freezing the template in place even after the key
+      # was fixed.
+      "_template": True,
       "portrait": (f"Лагна — {a['sign_ru']} ({a['nakshatra']}). Душевное ядро (Атмакарака) — "
                    f"{kk['Атмакарака']['pl_ru']}, направление реализации (Каракамса) — {chart['karakamsa']}. "
                    f"Сильнейший инструмент карты — {PL_RU[strongest]} ({vb[strongest]}/20). "
@@ -324,7 +331,8 @@ def generate_synastry(syn: dict) -> dict:
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         ak = syn["ashtakoota"]
-        return {"intersynastry": f"Планеты B на домах A: " +
+        return {"_template": True,
+                "intersynastry": f"Планеты B на домах A: " +
                     (", ".join(f"{o['planet']}→{o['house']}-й" for o in syn['overlay_ab']) or "нет") +
                     ". Подключите ANTHROPIC_API_KEY для развёрнутого разбора. (шаблон)",
                 "contrasts": f"Дополнения: дома {syn['complements'] or '—'}; зеркальные слабости: {syn['mirrors'] or '—'}. (шаблон)",
@@ -348,6 +356,7 @@ def generate_synastry(syn: dict) -> dict:
         # The old handler called generate_synastry.__wrapped__, which never
         # exists — so the fallback itself raised AttributeError on any failure.
         out = {
+            "_template": True,
             "intersynastry": "Планеты B на домах A: " +
                 (", ".join(f"{o['planet']}→{o['house']}-й" for o in syn['overlay_ab']) or "нет")
                 + ". (шаблон)",

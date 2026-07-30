@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import geo, jyotish, interpret, render, rectify as rectify_engine, synastry as synastry_engine
-import verify
+import store, verify
 
 app = FastAPI(title="Jyotish Almanac")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -105,28 +105,62 @@ def _verified(chart, loc, local_dt):
         raise HTTPException(status_code=409, detail=e.report)
 
 @app.post("/api/rectify")
-def rectify(data: BirthData):
-    """Step 1: compute lagna and return its description for confirmation."""
+def rectify(data: BirthData, refresh: bool = False):
+    """Step 1: compute lagna and return its description for confirmation.
+
+    The lagna description is a Claude call too, so it is cached on the same key.
+    """
     chart, loc, meta, _local_dt = _build(data)
-    desc = interpret.rectify_description(chart)
+    key = _narrative_key("lagna", data, loc)
+    if refresh:
+        store.drop(key)
+    desc = store.get(key)
+    cached = desc is not None
+    if not cached:
+        desc = interpret.rectify_description(chart)
+        if not desc.get("_template"):
+            store.put(key, desc)
     a = chart["ascendant"]
     return {"ascendant": a, "location": loc, "meta": meta, "description": desc,
-            "lagna_ru": a["sign_ru"]}
+            "lagna_ru": a["sign_ru"], "cached": cached}
+
+def _narrative_key(kind: str, data: BirthData, loc: dict) -> str:
+    return store.key_for(kind, data.name, data.date, data.time,
+                         loc["lat"], loc["lon"], loc["tz"])
 
 @app.post("/api/almanac")
-def almanac(data: BirthData):
+def almanac(data: BirthData, refresh: bool = False):
     """Step 2: full life-path almanac as standalone HTML.
 
     Order is mandatory: расчёт → верификация → нарратив. The narrative is only
     written after both verification barriers pass.
+
+    The narrative is cached per birth data (see store.py). The chart, the
+    verification gate and the HTML are rebuilt every time regardless: they cost
+    milliseconds, the gate must run on every request rather than once, and
+    caching rendered HTML would keep design changes from reaching anyone whose
+    almanac already existed. ?refresh=1 forces regeneration.
     """
     chart, loc, meta, local_dt = _build(data)
     verification = _verified(chart, loc, local_dt)     # ← blocks on failure
-    narrative = interpret.generate_almanac(chart)
+
+    key = _narrative_key("almanac", data, loc)
+    if refresh:
+        store.drop(key)
+    narrative = store.get(key)
+    cached = narrative is not None
+    if not cached:
+        narrative = interpret.generate_almanac(chart)
+        # Never cache a fallback: _note means Claude failed, and caching that
+        # would freeze the template in place long after the cause was fixed.
+        if not (narrative.get("_note") or narrative.get("_template")):
+            store.put(key, narrative)
+
     html = render.render_almanac(data.name, meta, chart, narrative)
     return {"html": html, "meta": meta, "lagna_ru": chart["ascendant"]["sign_ru"],
             # Reports whether Claude is usable, not merely whether a key is set.
             "has_ai": _ai_status()["status"] == "ok",
+            "cached": cached,
             "verification": verification}
 
 @app.get("/api/geocode")
@@ -172,7 +206,7 @@ def rectify_events(data: RectifyRequest):
     return result
 
 @app.post("/api/synastry")
-def synastry(req: SynastryRequest):
+def synastry(req: SynastryRequest, refresh: bool = False):
     """Step 4: two-chart compatibility as standalone HTML."""
     chart_a, loc_a, meta_a, dt_a = _build(req.person_a)
     chart_b, loc_b, meta_b, dt_b = _build(req.person_b)
@@ -181,10 +215,26 @@ def synastry(req: SynastryRequest):
     syn = synastry_engine.compute_synastry(chart_a, chart_b,
                                            req.person_a.name or "Партнёр A",
                                            req.person_b.name or "Партнёр B")
-    narrative = interpret.generate_synastry(syn)
+
+    # Keyed on both charts, so changing either partner regenerates.
+    key = store.key_for("synastry",
+                        _narrative_key("a", req.person_a, loc_a),
+                        _narrative_key("b", req.person_b, loc_b),
+                        "", 0.0, 0.0, "")
+    if refresh:
+        store.drop(key)
+    narrative = store.get(key)
+    cached = narrative is not None
+    if not cached:
+        narrative = interpret.generate_synastry(syn)
+        if not (narrative.get("_note") or narrative.get("_template")):
+            store.put(key, narrative)
+
     html = render.render_synastry(syn, narrative)
     return {"html": html, "ashtakoota": syn["ashtakoota"]["total"],
-            "has_ai": bool(os.environ.get("ANTHROPIC_API_KEY"))}
+            # Reports whether Claude is usable, not merely whether a key is set.
+            "has_ai": _ai_status()["status"] == "ok",
+            "cached": cached}
 
 _AI_STATUS: dict | None = None
 
@@ -280,6 +330,11 @@ def health():
             "model": os.environ.get("JYOTISH_MODEL", "claude-sonnet-5"),
             "engine_verified": engine["ok"],
             "engine_pass_rate": engine["pass_rate"]}
+
+@app.get("/api/cache")
+def cache_stats():
+    """Narrative cache counters — hits, misses, entries, and where they live."""
+    return store.stats()
 
 @app.get("/api/verify")
 def verify_status():

@@ -1,3 +1,6 @@
+# Narrative cache (generated at runtime, machine-local)
+.cache/
+
 # Secrets — never commit the real one; .env.example is the template
 .env
 .env.local
