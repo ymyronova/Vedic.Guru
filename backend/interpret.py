@@ -10,7 +10,7 @@ Design rule: Claude is given the *already computed* facts and told never to inve
 numbers — every figure in the prose comes from the engine, not the model.
 """
 from __future__ import annotations
-import os, json
+import hashlib, os, json
 
 MODEL = os.environ.get("JYOTISH_MODEL", "claude-sonnet-5")
 
@@ -79,6 +79,23 @@ _INSTRUCT = """На основе фактов карты напиши JSON ст�
 и только потом в круглых скобках — джйотиш-параметр, из которого она следует.
 Читатель не знает ни одного термина; скобка — его способ сверить фразу с
 таблицами отчёта."""
+
+def prompt_fingerprint() -> str:
+    """Отпечаток всего, что формирует текст: промпты, инструкции и модель.
+
+    Входит в ключ кэша. Поэтому правка тона или инструкций автоматически
+    обесценивает уже сохранённый текст: ключ становится другим, старая запись
+    больше не находится, и альманах переписывается под новый промпт. Сбрасывать
+    кэш вручную не нужно — иначе правка тона не дошла бы до тех, у кого текст
+    уже создан.
+
+    Уровень усилия (JYOTISH_EFFORT) сюда НЕ входит: это регулятор стоимости, а
+    не инструкция. Понижение effort ради экономии не должно выбрасывать уже
+    написанные тексты.
+    """
+    basis = "\n".join([SYSTEM, _INSTRUCT, _SYN_INSTRUCT, MODEL])
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:12]
+
 
 ALMANAC_KEYS = ("portrait", "shodashavarga", "yogas", "dasha", "integral", "planets")
 

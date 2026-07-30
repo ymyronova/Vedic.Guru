@@ -125,8 +125,11 @@ def rectify(data: BirthData, refresh: bool = False):
             "lagna_ru": a["sign_ru"], "cached": cached}
 
 def _narrative_key(kind: str, data: BirthData, loc: dict) -> str:
+    # The prompt fingerprint is part of the key: editing the tone rules changes
+    # it, so text written under the old prompt stops being found and regenerates.
     return store.key_for(kind, data.name, data.date, data.time,
-                         loc["lat"], loc["lon"], loc["tz"])
+                         loc["lat"], loc["lon"], loc["tz"],
+                         interpret.prompt_fingerprint())
 
 @app.post("/api/almanac")
 def almanac(data: BirthData, refresh: bool = False):
@@ -220,7 +223,7 @@ def synastry(req: SynastryRequest, refresh: bool = False):
     key = store.key_for("synastry",
                         _narrative_key("a", req.person_a, loc_a),
                         _narrative_key("b", req.person_b, loc_b),
-                        "", 0.0, 0.0, "")
+                        "", 0.0, 0.0, "", interpret.prompt_fingerprint())
     if refresh:
         store.drop(key)
     narrative = store.get(key)
