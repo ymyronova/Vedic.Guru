@@ -102,6 +102,131 @@ attachGeocoder("place",   "lat",   "lon",   "tz",   "geo-status");
 attachGeocoder("a-place", "a-lat", "a-lon", "a-tz", "a-geo-status");
 attachGeocoder("b-place", "b-lat", "b-lon", "b-tz", "b-geo-status");
 
+// ---- step navigation ------------------------------------------------------
+// Panels were previously toggled ad-hoc with .hidden in eight places, so there
+// was no way back and the almanac iframe was overwritten by each new run. This
+// keeps a stack of visited steps together with the payload each one needs, so
+// returning to a step re-renders exactly what it showed before — including an
+// earlier almanac. Wired to the History API so the browser's own back button
+// and swipe-back gesture move between steps instead of leaving the app.
+const PANELS = ["form-panel", "syn-panel", "rectify-panel", "events-panel",
+                "rectify-results-panel", "result-panel"];
+
+const PANEL_LABELS = {
+  "form-panel":            "Данные",
+  "syn-panel":             "Двое",
+  "rectify-panel":         "Лагна",
+  "events-panel":          "События",
+  "rectify-results-panel": "Варианты",
+  "result-panel":          "Альманах",
+};
+
+// How to rebuild a step's contents from its stored payload. Panels made only of
+// form inputs need no entry — the DOM keeps what was typed, since panels are
+// hidden rather than cleared.
+const RESTORE = {
+  "rectify-panel": d => {
+    $("lagna-badge").textContent = d.ascendant.sign_ru + " " + d.ascendant.dms;
+    $("lagna-desc").textContent = d.description.main;
+    $("lagna-confirm").textContent = d.description.confirm;
+  },
+  "rectify-results-panel": d => renderRanked(d),
+  "result-panel": d => {
+    // Also restore the download target, so saving gives the almanac on screen
+    // rather than whichever one was generated last.
+    lastAlmanacHtml = d.html;
+    lastName = d.name || lastName;
+    if ($("frame").srcdoc !== d.html) $("frame").srcdoc = d.html;
+  },
+};
+
+const NAV = { stack: [], i: -1, restoring: false };
+
+function showOnly(panel){
+  PANELS.forEach(id => { const el = $(id); if (el) el.classList.toggle("hidden", id !== panel); });
+}
+
+function renderNavBar(){
+  const bar = $("nav-bar");
+  if (!bar) return;
+  // Nothing to navigate until there is more than one step.
+  bar.classList.toggle("hidden", NAV.stack.length < 2);
+  $("nav-back").disabled = NAV.i <= 0;
+  $("nav-fwd").disabled  = NAV.i >= NAV.stack.length - 1;
+
+  const crumbs = $("nav-crumbs");
+  crumbs.innerHTML = "";
+  NAV.stack.forEach((step, idx) => {
+    const li = document.createElement("li");
+    li.className = "nav-crumb" + (idx === NAV.i ? " current" : "")
+                 + (idx > NAV.i ? " ahead" : "");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = PANEL_LABELS[step.panel] || step.panel;
+    b.addEventListener("click", () => navTo(idx));
+    li.appendChild(b);
+    crumbs.appendChild(li);
+  });
+}
+
+function applyStep(){
+  const step = NAV.stack[NAV.i];
+  if (!step) return;
+  showOnly(step.panel);
+  const restore = RESTORE[step.panel];
+  if (restore && step.data){
+    NAV.restoring = true;
+    try { restore(step.data); } finally { NAV.restoring = false; }
+  }
+  renderNavBar();
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+
+function navGo(panel, data){
+  // Taking a new action from a step discards anything that was ahead of it.
+  NAV.stack = NAV.stack.slice(0, NAV.i + 1);
+  NAV.stack.push({panel, data: data ?? null});
+  NAV.i = NAV.stack.length - 1;
+  applyStep();
+  history.pushState({navIndex: NAV.i}, "", "#" + panel);
+}
+
+function navTo(i){
+  if (i < 0 || i >= NAV.stack.length || i === NAV.i) return;
+  NAV.i = i;
+  applyStep();
+  history.pushState({navIndex: NAV.i}, "", "#" + NAV.stack[i].panel);
+}
+
+function navReset(panel){
+  NAV.stack = [{panel, data: null}];
+  NAV.i = 0;
+  applyStep();
+  history.replaceState({navIndex: 0}, "", "#" + panel);
+}
+
+$("nav-back").addEventListener("click", () => navTo(NAV.i - 1));
+$("nav-fwd").addEventListener("click",  () => navTo(NAV.i + 1));
+
+window.addEventListener("popstate", e => {
+  const i = e.state && typeof e.state.navIndex === "number" ? e.state.navIndex : 0;
+  if (i >= 0 && i < NAV.stack.length){
+    NAV.i = i;
+    applyStep();          // no pushState here — the browser already moved
+  }
+});
+
+document.addEventListener("keydown", e => {
+  // Alt+←/→ mirrors the browser shortcut, but only outside a text field.
+  if (!e.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) return;
+  if (e.key === "ArrowLeft"){ e.preventDefault(); navTo(NAV.i - 1); }
+  if (e.key === "ArrowRight"){ e.preventDefault(); navTo(NAV.i + 1); }
+});
+
+// Seed the stack with the opening panel, so the first step is itself a history
+// entry and the first navGo() doesn't drop it.
+navReset("form-panel");
+
 function birthPayload(){
   const p = {
     name: $("name").value.trim() || "Гость",
@@ -142,12 +267,7 @@ $("go").addEventListener("click", async () => {
   showLoader();
   try{
     const res = await api("/api/rectify", p);
-    $("lagna-badge").textContent = res.ascendant.sign_ru + " " + res.ascendant.dms;
-    $("lagna-desc").textContent = res.description.main;
-    $("lagna-confirm").textContent = res.description.confirm;
-    $("form-panel").classList.add("hidden");
-    $("rectify-panel").classList.remove("hidden");
-    window.scrollTo({top:0, behavior:"smooth"});
+    navGo("rectify-panel", res);
   }catch(e){ $("err").textContent = e.message; }
   finally{ hideLoader(); }
 });
@@ -159,15 +279,11 @@ $("confirm-yes").addEventListener("click", async () => {
   showLoader();
   try{
     const res = await api("/api/almanac", p);
-    lastAlmanacHtml = res.html;
-    $("frame").srcdoc = res.html;
-    $("rectify-panel").classList.add("hidden");
-    $("result-panel").classList.remove("hidden");
+    navGo("result-panel", {html: res.html, name: p.name});
     if (!res.has_ai){
       // gentle notice if API key not set
-      console.info("ANTHROPIC_API_KEY не задан — тексты в шаблонном режиме.");
+      console.info("Claude недоступен — тексты в шаблонном режиме. Подробности: /api/ai");
     }
-    window.scrollTo({top:0, behavior:"smooth"});
   }catch(e){ alert(e.message); }
   finally{ hideLoader(); }
 });
@@ -194,9 +310,7 @@ $("confirm-no").addEventListener("click", async () => {
   await loadCatalog();
   const list = $("events-list");
   if (!list.children.length){ list.appendChild(eventRow()); list.appendChild(eventRow()); list.appendChild(eventRow()); }
-  $("rectify-panel").classList.add("hidden");
-  $("events-panel").classList.remove("hidden");
-  window.scrollTo({top:0, behavior:"smooth"});
+  navGo("events-panel", null);
 });
 
 $("add-event").addEventListener("click", () => $("events-list").appendChild(eventRow()));
@@ -222,10 +336,7 @@ $("find-lagna").addEventListener("click", async () => {
   showLoader();
   try{
     const r = await api("/api/rectify_events", p);
-    renderRanked(r);
-    $("events-panel").classList.add("hidden");
-    $("rectify-results-panel").classList.remove("hidden");
-    window.scrollTo({top:0, behavior:"smooth"});
+    navGo("rectify-results-panel", r);   // RESTORE calls renderRanked
   }catch(e){ $("events-err").textContent = e.message; }
   finally{ hideLoader(); }
 });
@@ -270,21 +381,16 @@ async function generateWithTime(time){
   showLoader();
   try{
     const res = await api("/api/almanac", p);
-    lastAlmanacHtml = res.html;
-    $("frame").srcdoc = res.html;
-    $("rectify-results-panel").classList.add("hidden");
-    $("result-panel").classList.remove("hidden");
-    window.scrollTo({top:0, behavior:"smooth"});
+    navGo("result-panel", {html: res.html, name: p.name});
   }catch(e){ alert(e.message); }
   finally{ hideLoader(); }
 }
 
 $("restart").addEventListener("click", () => {
-  ["result-panel","rectify-panel","events-panel","rectify-results-panel"].forEach(id => $(id).classList.add("hidden"));
+  // "Start over" deliberately clears history — the old steps described a run
+  // the user is abandoning. Form inputs are kept so nothing is retyped.
   const compat = document.querySelector(".mode-btn.active")?.dataset.mode === "compat";
-  $("syn-panel").classList.toggle("hidden", !compat);
-  $("form-panel").classList.toggle("hidden", compat);
-  window.scrollTo({top:0, behavior:"smooth"});
+  navReset(compat ? "syn-panel" : "form-panel");
 });
 
 $("download").addEventListener("click", () => {
@@ -301,11 +407,8 @@ document.querySelectorAll(".mode-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
-    const compat = btn.dataset.mode === "compat";
-    ["rectify-panel","events-panel","rectify-results-panel","result-panel"].forEach(id => $(id).classList.add("hidden"));
-    $("form-panel").classList.toggle("hidden", compat);
-    $("syn-panel").classList.toggle("hidden", !compat);
-    window.scrollTo({top:0, behavior:"smooth"});
+    // Switching mode starts a different flow, so history restarts here too.
+    navReset(btn.dataset.mode === "compat" ? "syn-panel" : "form-panel");
   });
 });
 
@@ -331,11 +434,7 @@ $("go-syn").addEventListener("click", async () => {
   showLoader();
   try{
     const res = await api("/api/synastry", {person_a:a, person_b:b});
-    lastAlmanacHtml = res.html;
-    $("frame").srcdoc = res.html;
-    $("syn-panel").classList.add("hidden");
-    $("result-panel").classList.remove("hidden");
-    window.scrollTo({top:0, behavior:"smooth"});
+    navGo("result-panel", {html: res.html, name: lastName});
   }catch(e){ $("syn-err").textContent = e.message; }
   finally{ hideLoader(); }
 });
