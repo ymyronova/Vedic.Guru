@@ -10,23 +10,40 @@ window.addEventListener("error", e => showFatal((e.message||"") + (e.filename?` 
 window.addEventListener("unhandledrejection", e => showFatal("promise: " + (e.reason && (e.reason.message||e.reason) || "unknown")));
 
 // ---- connection self-test on load: proves JS runs and server is reachable ----
+// Retries while the instance wakes: on the free tier it sleeps after ~15 minutes
+// idle, and the first request lands on a proxy page. Failing outright there put
+// up a red dot and a scary banner for a server that was simply starting.
 (async () => {
   const dot = document.getElementById("status-dot");
-  try {
-    const r = await fetch("/api/health");
-    const d = await r.json();
-    if (dot){
-      dot.classList.add(d.ai ? "ok" : "warn");
-      // ai_detail names the actual cause (bad key / no credit / wrong model);
-      // the old tooltip always said "нет ключа", which was usually wrong.
-      dot.title = d.ai
-        ? "сервер на связи · тексты Claude включены"
-        : "сервер на связи · шаблонный режим — " + (d.ai_detail || "Claude недоступен");
+  const setDot = (cls, title) => {
+    if (!dot) return;
+    dot.classList.remove("ok", "bad", "warn");
+    if (cls) dot.classList.add(cls);
+    dot.title = title;
+  };
+  setDot(null, "проверка связи…");
+
+  for (let attempt = 1; attempt <= 4; attempt++){
+    try{
+      const r = await fetch("/api/health", {cache: "no-store"});
+      const raw = await r.text();
+      const d = JSON.parse(raw);          // throws on a gateway page, not on our JSON
+      setDot(d.ai ? "ok" : "warn",
+             d.ai ? "сервер на связи · тексты Claude включены"
+                  // ai_detail names the real cause (bad key / no credit / wrong
+                  // model); the old tooltip always claimed "нет ключа".
+                  : "сервер на связи · шаблонный режим — " + (d.ai_detail || "Claude недоступен"));
+      console.info("health:", d);
+      return;
+    }catch(e){
+      if (attempt === 4){
+        setDot("bad", "нет связи с сервером");
+        showFatal("не удаётся связаться с сервером: " + e.message);
+        return;
+      }
+      setDot("warn", "сервер просыпается…");
+      await new Promise(res => setTimeout(res, attempt * 2000));
     }
-    console.info("health:", d);
-  } catch (e) {
-    if (dot){ dot.classList.add("bad"); dot.title = "нет связи с сервером"; }
-    showFatal("не удаётся связаться с сервером: " + e.message);
   }
 })();
 
@@ -41,8 +58,15 @@ const LOAD_MSGS = [
 let loadTimer = null;
 function showLoader(){
   const l = $("loader"); l.classList.remove("hidden");
-  let i = 0; $("loader-text").textContent = LOAD_MSGS[0];
-  loadTimer = setInterval(() => { i = (i+1) % LOAD_MSGS.length; $("loader-text").textContent = LOAD_MSGS[i]; }, 1600);
+  let i = 0, ticks = 0;
+  // A full almanac takes ~70s, and longer on a cold start. Say so once it has
+  // been a while, so a normal wait doesn't read as a hang.
+  const paint = () => {
+    const slow = ticks * 1.6 >= 25 ? "  ·  обычно до минуты" : "";
+    $("loader-text").textContent = LOAD_MSGS[i] + slow;
+  };
+  paint();
+  loadTimer = setInterval(() => { ticks++; i = (i+1) % LOAD_MSGS.length; paint(); }, 1600);
 }
 function hideLoader(){ $("loader").classList.add("hidden"); clearInterval(loadTimer); }
 
@@ -243,9 +267,36 @@ function birthPayload(){
   return p;
 }
 
+// A non-JSON response is almost always a gateway page rather than anything this
+// app produced: on the free tier the instance sleeps after ~15 minutes idle and
+// the proxy answers with HTML while it wakes. r.json() turned that into
+// "Unexpected token '<'", which tells the user nothing and looks like a bug in
+// the app. Name the actual situation instead.
+function gatewayMessage(status, raw){
+  const html = /^\s*<(!doctype|html)/i.test(raw || "");
+  if (status === 502 || status === 503 || status === 504 || status === 0)
+    return `Сервер не ответил (${status || "нет ответа"}). На бесплатном тарифе он ` +
+           `засыпает при простое и просыпается ~минуту — попробуйте ещё раз.`;
+  if (html)
+    return `Сервер вернул страницу вместо данных (HTTP ${status}) — запрос не дошёл ` +
+           `до приложения. Подождите минуту и повторите.`;
+  return `Неожиданный ответ сервера (HTTP ${status}).`;
+}
+
 async function api(path, body){
-  const r = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
-  const data = await r.json();
+  let r;
+  try{
+    r = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  }catch(e){
+    throw new Error("Нет связи с сервером: " + e.message);
+  }
+  const raw = await r.text();
+  let data;
+  try{
+    data = raw ? JSON.parse(raw) : {};
+  }catch{
+    throw new Error(gatewayMessage(r.status, raw));
+  }
   if (!r.ok){
     // The verification gate (409) returns a structured detail object, not a
     // string — render its message rather than "[object Object]".
