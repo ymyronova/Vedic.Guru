@@ -161,6 +161,9 @@ const RESTORE = {
     lastAlmanacHtml = d.html;
     lastName = d.name || lastName;
     if ($("frame").srcdoc !== d.html) $("frame").srcdoc = d.html;
+    // Fresh arrival: hide the print hint again. The click handler decides
+    // whether this user has earned it.
+    $("print-hint").classList.add("hidden");
   },
 };
 
@@ -458,10 +461,26 @@ $("restart").addEventListener("click", () => {
 // grid poorly, which this layout uses in the section headers, planet blocks and
 // two-column cards. A weaker second renderer would produce a worse PDF than the
 // one Chrome already makes from these rules.
+// The "выберите «Сохранить как PDF»" step is only news once. Remember that it
+// has been shown, so it does not nag on every later download.
+const PRINT_HINT_KEY = "jyotish.printHintSeen";
+const printHintSeen = () => {
+  // Storage can throw in private mode or when cookies are blocked. Treat that
+  // as "not seen": showing the hint again is harmless, an exception is not.
+  try { return localStorage.getItem(PRINT_HINT_KEY) === "1"; }
+  catch { return false; }
+};
+const markPrintHintSeen = () => {
+  try { localStorage.setItem(PRINT_HINT_KEY, "1"); } catch {}
+};
+
 $("download").addEventListener("click", () => {
   const f = $("frame");
   if (!f || !lastAlmanacHtml){ alert("Альманах ещё не готов."); return; }
-  $("print-hint").classList.remove("hidden");
+  if (!printHintSeen()){
+    $("print-hint").classList.remove("hidden");
+    markPrintHintSeen();
+  }
   try{
     // srcdoc is same-origin, so the frame's own print() is reachable and prints
     // the document alone — not the surrounding app.
