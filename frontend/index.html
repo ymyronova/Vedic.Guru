@@ -68,6 +68,22 @@
       </div>
       <div class="field"><label>Часовой пояс (IANA, необязательно)</label><input id="tz" type="text" placeholder="авто"></div>
     </details>
+    <!-- Фокус меняет ВЕСЬ текст отчёта, а не добавляет раздел, поэтому
+         спрашиваем до расчёта, а не после. -->
+    <div class="field">
+      <label>О чём разбор</label>
+      <div class="focus-picker" id="focus-picker" role="radiogroup" aria-label="Фокус разбора">
+        <button type="button" class="focus-opt active" data-focus="general">Общий</button>
+        <button type="button" class="focus-opt" data-focus="career">Бизнес и карьера</button>
+        <button type="button" class="focus-opt" data-focus="money">Деньги</button>
+        <button type="button" class="focus-opt" data-focus="love">Любовь и отношения</button>
+        <button type="button" class="focus-opt" data-focus="other">Своя тема…</button>
+      </div>
+      <input id="focus-note" type="text" class="hidden" maxlength="80"
+             placeholder="Например: стоит ли менять страну в этом году">
+      <span class="hint">Те же расчёты — но отобранные и объяснённые под ваш вопрос.</span>
+    </div>
+
     <button id="go" class="cta">Рассчитать лагну →</button>
     <!-- Показывается только тем, кто уже проходил подтверждение лагны: для них
          главная кнопка ведёт сразу к альманаху, а этот путь остаётся входом

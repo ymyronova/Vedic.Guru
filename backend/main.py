@@ -65,6 +65,10 @@ class BirthData(BaseModel):
     lat: float | None = None
     lon: float | None = None
     tz: str | None = None
+    # Фокус разбора: general | career | money | love | other.
+    # Меняет весь текст, поэтому входит в ключ кэша (см. _narrative_key).
+    focus: str = "general"
+    focus_note: str = ""     # своя тема, когда focus == "other"
 
 class LifeEvent(BaseModel):
     date: str                       # "YYYY" | "YYYY-MM" | "YYYY-MM-DD"
@@ -128,7 +132,13 @@ def rectify(data: BirthData, refresh: bool = False):
 def _narrative_key(kind: str, data: BirthData, loc: dict) -> str:
     # The prompt fingerprint is part of the key: editing the tone rules changes
     # it, so text written under the old prompt stops being found and regenerates.
-    return store.key_for(kind, data.name, data.date, data.time,
+    # The focus goes in too — it rewrites every section, so a career reading and
+    # a love reading of the same chart are different texts, not one cached one.
+    focus = (data.focus or "general").strip().lower()
+    if focus not in interpret.FOCUS_KEYS:
+        focus = "general"
+    sig = focus if focus != "other" else "other:" + (data.focus_note or "").strip().lower()[:80]
+    return store.key_for(f"{kind}|{sig}", data.name, data.date, data.time,
                          loc["lat"], loc["lon"], loc["tz"],
                          interpret.prompt_fingerprint())
 
@@ -154,14 +164,17 @@ def almanac(data: BirthData, refresh: bool = False):
     narrative = store.get(key)
     cached = narrative is not None
     if not cached:
-        narrative = interpret.generate_almanac(chart)
+        narrative = interpret.generate_almanac(chart, data.focus, data.focus_note)
         # Never cache a fallback: _note means Claude failed, and caching that
         # would freeze the template in place long after the cause was fixed.
         if not (narrative.get("_note") or narrative.get("_template")):
             store.put(key, narrative)
 
-    html = render.render_almanac(data.name, meta, chart, narrative)
+    flabel = interpret.focus_label(data.focus, data.focus_note)
+    html = render.render_almanac(data.name, meta, chart, narrative,
+                                 focus=None if data.focus in (None, "", "general") else flabel)
     return {"html": html, "meta": meta, "lagna_ru": chart["ascendant"]["sign_ru"],
+            "focus": flabel,
             # Reports whether Claude is usable, not merely whether a key is set.
             "has_ai": _ai_status()["status"] == "ok",
             "cached": cached,

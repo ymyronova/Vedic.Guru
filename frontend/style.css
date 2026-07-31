@@ -97,6 +97,15 @@ input#time:disabled{opacity:.45;cursor:not-allowed;}
 .geo{display:block;font-size:12.5px;margin-top:6px;color:var(--muted);min-height:1em;line-height:1.35;}
 .geo.ok{color:var(--accent);}   /* координаты вычислены — Meridian по назначению */
 .geo.bad{color:var(--ink);}     /* не нашли город: сбой ввода, не «плохая карта» */
+/* Фокус разбора — чипы, а не select: варианты видны сразу, выбор в один клик. */
+.focus-picker{display:flex;flex-wrap:wrap;gap:8px;}
+.focus-opt{background:transparent;border:1px solid var(--line);color:var(--muted);
+  font-family:var(--sans);font-size:13.5px;padding:8px 14px;border-radius:20px;
+  cursor:pointer;transition:all .18s;}
+.focus-opt:hover{border-color:var(--accent);color:var(--ink);}
+.focus-opt.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+#focus-note{margin-top:10px;}
+
 .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 @media(max-width:520px){.row{grid-template-columns:1fr}}
 .manual{margin:2px 0 18px;border-top:1px dashed var(--line);padding-top:12px;}

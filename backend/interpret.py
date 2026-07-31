@@ -104,6 +104,44 @@ _INSTRUCT = """На основе фактов карты напиши JSON ст�
 Читатель не знает ни одного термина; скобка — его способ сверить фразу с
 таблицами отчёта."""
 
+# ─── фокус разбора ────────────────────────────────────────────────────────────
+FOCUS_LABELS = {
+    "general": "Общий разбор",
+    "career":  "Бизнес и карьера",
+    "money":   "Деньги и ресурсы",
+    "love":    "Любовь и отношения",
+}
+FOCUS_KEYS = tuple(FOCUS_LABELS) + ("other",)
+
+def focus_label(focus: str | None, note: str = "") -> str:
+    """Человеческое название фокуса — оно же попадает в шапку отчёта."""
+    if focus == "other":
+        return (note or "").strip()[:80] or FOCUS_LABELS["general"]
+    return FOCUS_LABELS.get(focus or "general", FOCUS_LABELS["general"])
+
+def _focus_block(focus: str | None, note: str = "") -> str:
+    """Инструкция, разворачивающая ВЕСЬ текст в сторону интереса читателя."""
+    if not focus or focus == "general":
+        return ""
+    label = focus_label(focus, note)
+    return f"""
+
+ФОКУС РАЗБОРА: {label}
+
+Это не отдельный раздел и не приписка в конце — это призма для всего текста.
+Каждый раздел пишется под этот вопрос:
+— из каждой конфигурации бери то следствие, которое относится к фокусу, а не
+  первое попавшееся;
+— примеры и сцены — из этой сферы жизни, конкретные, а не абстрактные;
+— рекомендации отвечают на «что мне с этим делать» именно здесь;
+— остальные сферы не исчезают, но идут фоном и коротко.
+
+Важное ограничение: НЕ подгоняй карту под фокус. Расчётные факты те же самые —
+меняется отбор и объяснение, а не данные. Если по теме фокуса карта ничего
+внятного не говорит, так и напиши: это честный ответ, а выдуманная связка —
+нет."""
+
+
 def prompt_fingerprint() -> str:
     """Отпечаток всего, что формирует текст: промпты, инструкции и модель.
 
@@ -196,14 +234,16 @@ def _text_of(msg) -> str:
     return text
 
 
-def generate_almanac(chart: dict) -> dict:
+def generate_almanac(chart: dict, focus: str | None = None,
+                     focus_note: str = "") -> dict:
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         return _fallback(chart)
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=key)
-        msg, structured = _ask(client, _facts(chart) + "\n\n" + _INSTRUCT,
+        prompt = _facts(chart) + "\n\n" + _INSTRUCT + _focus_block(focus, focus_note)
+        msg, structured = _ask(client, prompt,
                                NARRATIVE_MAX_TOKENS, _ALMANAC_SCHEMA)
         text = _text_of(msg)
         if not structured:      # older model: still tolerate a fenced block

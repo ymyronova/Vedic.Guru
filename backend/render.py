@@ -199,7 +199,7 @@ def _section5_table(chart, player):
                f"<td class='mono'>{player[h]:.1f}</td><td><span class='tag {cls}'>{name}</span></td></tr>")
     return rows
 
-def render_almanac(name, birth_meta, chart, narrative):
+def render_almanac(name, birth_meta, chart, narrative, focus=None):
     esc=_h.escape
     bubble, player = bubble_svg(chart)
     a=chart["ascendant"]
@@ -210,6 +210,7 @@ def render_almanac(name, birth_meta, chart, narrative):
       <h1>{esc(name)}</h1>
       <div class="sub">{a['sign_ru']}-лагна · {a['nakshatra']}</div>
       <div class="meta">{esc(birth_meta)} &nbsp;|&nbsp; Лахири · цельнознаковые дома</div>
+      {f'<div class="focus-badge">Фокус: {esc(focus)}</div>' if focus else ''}
       <div class="chartwrap">{natal_svg(chart)}</div></div>""")
     # 1 portrait
     parts.append(f"""<section><div class="sec-head"><div class="sec-num">1</div><h2>Портрет одной нитью</h2></div>

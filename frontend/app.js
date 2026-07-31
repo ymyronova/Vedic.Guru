@@ -257,12 +257,31 @@ document.addEventListener("keydown", e => {
 // entry and the first navGo() doesn't drop it.
 navReset("form-panel");
 
+// ---- focus of the reading ---------------------------------------------------
+// Chosen before the run because it rewrites every section rather than adding
+// one, and because a 70-second generation is the wrong place to discover the
+// report answers a question you did not ask.
+let FOCUS = "general";
+
+document.querySelectorAll(".focus-opt").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".focus-opt").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    FOCUS = btn.dataset.focus;
+    const own = FOCUS === "other";
+    $("focus-note").classList.toggle("hidden", !own);
+    if (own) $("focus-note").focus();
+  });
+});
+
 function birthPayload(){
   const p = {
     name: $("name").value.trim() || "Гость",
     date: $("date").value,
     time: $("time").value || "12:00",
     place: $("place").value.trim() || null,
+    focus: FOCUS,
+    focus_note: FOCUS === "other" ? $("focus-note").value.trim() : "",
   };
   const lat = $("lat").value, lon = $("lon").value, tz = $("tz").value.trim();
   if (lat && lon){ p.lat = parseFloat(lat); p.lon = parseFloat(lon); }
@@ -416,6 +435,10 @@ function validBirth(p){
   // With "не знаю" ticked the time field is empty by design, so it is not
   // required — the events flow reconstructs it.
   if (!timeUnknown() && !p.time){ $("err").textContent = "Укажите время или отметьте «не знаю»."; return false; }
+  // "Своя тема" without a topic would silently fall back to a general reading
+  // after a 70-second wait — ask now instead.
+  if (p.focus === "other" && !p.focus_note){
+    $("err").textContent = "Опишите свою тему — иначе разбор будет общим."; return false; }
   if (!p.place && !(Number.isFinite(p.lat) && Number.isFinite(p.lon))){
     $("err").textContent = "Укажите место рождения или координаты."; return false; }
   return true;
