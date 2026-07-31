@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import geo, jyotish, interpret, render, rectify as rectify_engine, synastry as synastry_engine
-import pdfout, store, verify
+import pdfout, store, varshaphala, verify
 
 app = FastAPI(title="Jyotish Almanac")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -69,6 +69,10 @@ class BirthData(BaseModel):
     # Меняет весь текст, поэтому входит в ключ кэша (см. _narrative_key).
     focus: str = "general"
     focus_note: str = ""     # своя тема, когда focus == "other"
+    # Сколько годовых частей (Варшапхала) считать. 0 — только натал.
+    # Число частей меняет и расчёт, и текст, поэтому входит в ключ кэша.
+    years: int = 3
+    year_from: int | None = None     # первый год; по умолчанию текущий
 
 class LifeEvent(BaseModel):
     date: str                       # "YYYY" | "YYYY-MM" | "YYYY-MM-DD"
@@ -111,6 +115,29 @@ def _build(data: BirthData):
     meta = f"{d:02d}.{m:02d}.{y} · {data.time} · {data.place or loc['label']}"
     return chart, loc, meta, local_dt
 
+
+MAX_YEARS = 6
+
+
+def _attach_years(chart: dict, data: BirthData, loc: dict, local_dt: datetime) -> None:
+    """Годовые части считаются ДО шлюза, а не после.
+
+    Их числа попадают и в документ, и в ответы на вопросы, поэтому проверять их
+    надо там же, где натальные, — иначе годовой слой прошёл бы мимо барьера.
+    Сбой расчёта одного года не должен ронять натальный отчёт: части просто не
+    появятся, и это будет видно в ответе.
+    """
+    count = max(0, min(int(data.years or 0), MAX_YEARS))
+    if not count:
+        return
+    try:
+        chart["varsha"] = varshaphala.build_annual_parts(
+            chart, local_dt, loc["lat"], loc["lon"], loc["tz"],
+            count=count, place=data.place or loc["label"],
+            start_year=data.year_from)
+    except Exception as e:
+        chart["varsha_error"] = f"{type(e).__name__}: {e}"
+
 def _verified(chart, loc, local_dt):
     """Mandatory gate: calculation must be verified before any narrative is written.
 
@@ -151,6 +178,13 @@ def _narrative_key(kind: str, data: BirthData, loc: dict) -> str:
     if focus not in interpret.FOCUS_KEYS:
         focus = "general"
     sig = focus if focus != "other" else "other:" + (data.focus_note or "").strip().lower()[:80]
+    # Число годовых частей и стартовый год тоже в ключе: три года и один год —
+    # разные тексты, и годы 2025+ отличаются от 2030+. Без этого возврат за
+    # другим числом лет находил бы чужой кэш.
+    years = max(0, min(int(getattr(data, "years", 0) or 0), MAX_YEARS))
+    sig += f"|y{years}"
+    if getattr(data, "year_from", None):
+        sig += f"@{data.year_from}"
     return store.key_for(f"{kind}|{sig}", data.name, data.date, data.time,
                          loc["lat"], loc["lon"], loc["tz"],
                          interpret.prompt_fingerprint())
@@ -169,6 +203,7 @@ def almanac(data: AlmanacRequest, refresh: bool = False):
     almanac already existed. ?refresh=1 forces regeneration.
     """
     chart, loc, meta, local_dt = _build(data)
+    _attach_years(chart, data, loc, local_dt)
     verification = _verified(chart, loc, local_dt)     # ← blocks on failure
 
     key = _narrative_key("almanac", data, loc)
@@ -178,6 +213,12 @@ def almanac(data: AlmanacRequest, refresh: bool = False):
     cached = narrative is not None
     if not cached:
         narrative = interpret.generate_almanac(chart, data.focus, data.focus_note)
+        # Годовой текст пишется отдельными запросами и складывается в тот же
+        # объект: кэш один, значит повторный визит не платит ни за натальную
+        # часть, ни за годовые.
+        if chart.get("varsha"):
+            narrative.update(interpret.generate_years(
+                chart["varsha"], data.focus, data.focus_note))
         # Never cache a fallback: _note means Claude failed, and caching that
         # would freeze the template in place long after the cause was fixed.
         if not (narrative.get("_note") or narrative.get("_template")):
@@ -187,11 +228,16 @@ def almanac(data: AlmanacRequest, refresh: bool = False):
     html = render.render_almanac(data.name, meta, chart, narrative,
                                  focus=None if data.focus in (None, "", "general") else flabel,
                                  qa=[p.model_dump() for p in data.qa])
+    parts = chart.get("varsha") or []
     return {"html": html, "meta": meta, "lagna_ru": chart["ascendant"]["sign_ru"],
             "focus": flabel,
             # Reports whether Claude is usable, not merely whether a key is set.
             "has_ai": _ai_status()["status"] == "ok",
             "cached": cached,
+            "years": [p["label"] for p in parts],
+            # Сбой годового расчёта не роняет отчёт, но и не молчит: без этого
+            # поля пропавшие годовые части выглядели бы как «так и задумано».
+            "years_error": chart.get("varsha_error"),
             "verification": verification}
 
 @app.post("/api/ask")

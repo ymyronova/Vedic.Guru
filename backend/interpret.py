@@ -14,6 +14,8 @@ import hashlib, os, json
 
 MODEL = os.environ.get("JYOTISH_MODEL", "claude-sonnet-5")
 
+from jyotish import PL_RU as _PL
+
 SYSTEM = """Ты — сервис «Джйотиш-Альманах». Пиши ВСЕГДА на русском, тёплым, точным,
 образным языком. Это символический интерпретативный материал — не предсказание,
 не медицинское и не психологическое суждение о человеке. Никогда не выдумывай
@@ -63,7 +65,7 @@ DIGNITY_RU = {
 
 # Входит в отпечаток промпта. Меняете формат фактов — поднимите версию, иначе
 # уже сохранённый текст, написанный по старым формулировкам, останется в кэше.
-FACTS_VERSION = "2-dignity-words"
+FACTS_VERSION = "3-varshaphala"
 
 
 def _facts(chart: dict) -> str:
@@ -95,8 +97,7 @@ _INSTRUCT = """На основе фактов карты напиши JSON ст�
  "shodashavarga": "Раздел 2 — 2–3 абзаца: какая планета рабочий инструмент и почему, парадокс между Атмакаракой и операционными силами, что это значит для стратегии; затем разбор сильных и слабых домов по бинду.",
  "yogas": "Раздел 3 — по абзацу на каждую обнаруженную йогу: механизм простыми словами, что активирует в жизни, оценка силы.",
  "dasha": "Раздел 4 — обзор дуги жизни по махадашам с качественной оценкой каждой и особенно подробно про текущую махадашу и антардашу: что это за окно, какие сферы активны.",
- "integral": "Раздел 5 «Итоговая картина» — 3 абзаца: тип судьбы (сильный игрок/сильное поле/оба/ни то), главная формула жизни, единственная подлинная ахиллесова пята.",
- "planets": "Раздел 6 — для каждой из 7 планет короткий блок из 3–4 фраз: состояние в карте, высшее состояние (что активирует лучшее), раджа-активатор, чего избегать. Верни как один связный текст с подзаголовками-планетами."
+ "integral": "Раздел «Итоговая картина» — 3 абзаца: тип судьбы (сильный игрок/сильное поле/оба/ни то), главная формула жизни, единственная подлинная ахиллесова пята."
 }
 
 Напоминание про тон: в каждом разделе каждая мысль сначала простыми словами,
@@ -160,11 +161,18 @@ def prompt_fingerprint() -> str:
     не инструкция. Понижение effort ради экономии не должно выбрасывать уже
     написанные тексты.
     """
-    basis = "\n".join([SYSTEM, _INSTRUCT, _SYN_INSTRUCT, MODEL, FACTS_VERSION])
+    # Годовые инструкции входят наравне с натальными: без них правка текста
+    # годовой части не обесценила бы кэш, и читатель получил бы старые
+    # формулировки под новыми таблицами.
+    basis = "\n".join([SYSTEM, _INSTRUCT, _SYN_INSTRUCT, _ANNUAL_INSTRUCT,
+                       _COMPARE_INSTRUCT, MODEL, FACTS_VERSION])
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:12]
 
 
-ALMANAC_KEYS = ("portrait", "shodashavarga", "yogas", "dasha", "integral", "planets")
+# «planets» больше нет: раздел «Как держать каждую планету в высшем состоянии»
+# удалён из документа, и просить у модели текст, которому некуда встать, —
+# значит платить за него токенами и рисковать обрезкой остальных разделов.
+ALMANAC_KEYS = ("portrait", "shodashavarga", "yogas", "dasha", "integral")
 
 # Structured outputs: the response is constrained to this schema, so it cannot
 # come back as prose, as a code-fenced block, or as JSON with an extra key.
@@ -258,6 +266,187 @@ def generate_almanac(chart: dict, focus: str | None = None,
         out = _fallback(chart)
         out["_note"] = f"Claude недоступен ({type(e).__name__}: {e}); показан шаблон."
         return out
+
+# ─── годовой слой (Варшапхала) ────────────────────────────────────────────────
+ANNUAL_MAX_TOKENS = int(os.environ.get("JYOTISH_ANNUAL_TOKENS", "12000"))
+
+IMPACT_KEYS = ("chart", "muntha", "varshesha", "tajika", "dashas",
+               "sahams", "months", "axes", "onepager")
+
+_ANNUAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "thread": {"type": "string"},
+        "formula": {"type": "string"},
+        "focus": {"type": "array", "items": {"type": "string"},
+                  "minItems": 3, "maxItems": 3},
+        "care": {"type": "array", "items": {"type": "string"},
+                 "minItems": 3, "maxItems": 3},
+        "spheres": {"type": "array", "items": {"type": "string"},
+                    "minItems": 3, "maxItems": 6},
+        "impacts": {
+            "type": "object",
+            "properties": {k: {"type": "string"} for k in IMPACT_KEYS},
+            "required": list(IMPACT_KEYS),
+            "additionalProperties": False,
+        },
+    },
+    "required": ["thread", "formula", "focus", "care", "spheres", "impacts"],
+    "additionalProperties": False,
+}
+
+_COMPARE_SCHEMA = {
+    "type": "object",
+    "properties": {k: {"type": "string"}
+                   for k in ("params", "trend", "money", "months")},
+    "required": ["params", "trend", "money", "months"],
+    "additionalProperties": False,
+}
+
+
+def _annual_facts(part: dict) -> str:
+    """Факты одного года — ровно то, на что тексту разрешено опираться."""
+    v = part["varshesha"]["winner"]
+    mun = part["muntha"]
+    lines = [
+        f"ГОД {part['label']}, возраст {part['age']}. Вход в год: "
+        f"{part['pravesh']['local']:%d.%m.%Y %H:%M}, карта "
+        f"{'дневная' if part['is_day'] else 'ночная'}.",
+        f"Варша-Лагна: {part['lagna_sign_ru']} {part['lagna_dms']}, "
+        f"её управитель {_PL[part['lagna_lord']]}.",
+        f"Управитель года (Варшеша): {v['planet_ru']}, сила {v['bala']:.1f} из 80, "
+        f"выбран как {v['role']}.",
+        f"Мунтха (точка, идущая на знак за год): {mun['sign_ru']}, "
+        f"{mun['house']}-й дом, управитель {mun['lord_ru']}.",
+        "Планеты годовой карты:",
+    ]
+    for p in part["planets"]:
+        rules = ", ".join(f"{h}-й" for h in p["rules"]) or "—"
+        lines.append(f"  {p['name']}: {p['pos']}, дом {p['house']}, "
+                     f"управляет {rules}, {p['dignity_ru']}")
+    lines.append("Силы планет (Панча-Варгия, из 80): " + ", ".join(
+        f"{_PL[k]} {vv['total']:.1f}" for k, vv in part["pancha"].items()))
+    present = [y for y in part["tajika"]["yogas"] if y["present"]]
+    lines.append("Связи года (присутствуют): " + "; ".join(
+        f"{y['name']} — {y['meaning']} [{y['evidence']}]" for y in present))
+    absent = [y["name"] for y in part["tajika"]["yogas"] if not y["present"]]
+    lines.append("Связи года (отсутствуют): " + ", ".join(absent))
+    lines.append("Месяцы года (метка | знак·дом | громкость денежной темы 0–10 | "
+                 "знак исхода −5…+5 | активные темы):")
+    for m in part["months"]:
+        lines.append(f"  {m['label']} | {m['sign_ru']}·{m['house']}-й | "
+                     f"{m['salience']:.1f} | {m['valence']:+.1f} | "
+                     f"{', '.join(m['sahams'][:4]) or '—'}")
+    lines.append("Годовые шкалы: " + "; ".join(
+        f"{nm}: " + ", ".join(str(s["lord"]) for s in segs[:4]) + "…"
+        for nm, segs in part["dashas"].items()))
+    return "\n".join(lines)
+
+
+_ANNUAL_INSTRUCT = """Напиши JSON про ЭТОТ год строго с этими ключами:
+{
+ "thread": "Итог года одной нитью — один плотный абзац (4–6 предложений): чем этот год занят, на чём держится, где его тень.",
+ "formula": "Формула года одной фразой — короткая, запоминающаяся, без терминов вне скобок.",
+ "focus": ["три фокуса года — по одной фразе, каждая с параметром в скобках"],
+ "care": ["три зоны осторожности — по одной фразе, каждая с параметром в скобках"],
+ "spheres": ["3–6 строк по сферам жизни: сфера — что с ней в этом году"],
+ "impacts": {
+   "chart": "«Влияние на жизнь» после годовой карты: 3–4 строки, что расстановка домов означает практически.",
+   "muntha": "После темы года: чем именно будет занят год и куда стоит вкладывать.",
+   "varshesha": "После управителя года: что идёт легче, потому что год держит именно эта планета.",
+   "tajika": "После связей года: что созревает и требует участия, а что уйдёт само.",
+   "dashas": "После пяти шкал: где шкалы сходятся и что это меняет в поведении.",
+   "sahams": "После тем года: как пользоваться тем, что тема включается в свой месяц.",
+   "months": "После помесячной таблицы: как читать её в решениях.",
+   "axes": "После двух осей: что делать в громком месяце с отрицательным знаком.",
+   "onepager": "После one-pager: одна мысль, которую стоит унести из года."
+ }
+}
+
+ВАЖНО про две денежные оси. Громкость денежной темы и знак исхода — РАЗНЫЕ
+величины, и сливать их в одну оценку нельзя. Громко и в минусе — месяц, когда
+деньги звучат много и это плохо; тихо и в плюсе — месяц, когда их просто мало
+в повестке. Пиши про них раздельно.
+
+Блок «Влияние на жизнь» отвечает на «и что мне с этим делать», а не
+пересказывает таблицу выше. Три-четыре строки, не больше.
+
+Тон тот же: сначала простыми словами, потом в круглых скобках — параметр года,
+из которого фраза следует. Читатель не знает ни одного термина. Названия связей
+года (Итхасала, Камбула, Дурапха и прочие) — только внутри скобок, никогда как
+самостоятельное утверждение."""
+
+_COMPARE_INSTRUCT = """Напиши JSON про СРАВНЕНИЕ лет строго с этими ключами:
+{
+ "params": "«Влияние на жизнь» после таблицы параметров по годам: какое направление видно, 3–4 строки.",
+ "trend": "После графиков по годам: какой год проще для крупных решений и почему.",
+ "money": "После финансового разреза: раздельно про громкость денежной темы и про знак исхода.",
+ "months": "После единой шкалы месяцев: повторяется ли трудный месяц из года в год."
+}
+
+Смысл блока — показать тренд, которого не видно ни в одной отдельной части.
+Не пересказывай отдельные годы: сравнивай их. Тон и правило скобок те же."""
+
+
+def _annual_payload(text: str, structured: bool) -> dict:
+    if not structured:
+        text = text.strip().removeprefix("```json").removeprefix("```") \
+                   .removesuffix("```").strip()
+    return json.loads(text)
+
+
+def generate_years(parts: list, focus: str | None = None,
+                   focus_note: str = "") -> dict:
+    """Текст годовых частей и блока сравнения.
+
+    Год за годом отдельными запросами, а не одним: девять блоков «влияние» на
+    каждый из трёх лет в одном ответе упираются в max_tokens и обрезаются на
+    середине строки, а обрезанный JSON стоит целого документа. Отдельные
+    запросы дороже по времени, но нарратив кэшируется — платится один раз.
+
+    Ошибка любого года не роняет отчёт: у отрисовки есть детерминированные
+    запасные формулировки, собранные из самих данных.
+    """
+    if not parts:
+        return {}
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return {}
+    out: dict = {"years": [], "compare": {}}
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=key)
+    except Exception:
+        return {}
+
+    fblock = _focus_block(focus, focus_note)
+    for part in parts:
+        try:
+            prompt = _annual_facts(part) + "\n\n" + _ANNUAL_INSTRUCT + fblock
+            msg, structured = _ask(client, prompt, ANNUAL_MAX_TOKENS, _ANNUAL_SCHEMA)
+            out["years"].append(_annual_payload(_text_of(msg), structured))
+        except Exception as e:
+            out["years"].append({"_note": f"{type(e).__name__}: {e}"})
+
+    if len(parts) >= 2:
+        try:
+            summary = "\n\n".join(
+                f"{p['label']}: Варша-Лагна {p['lagna_sign_ru']}, управитель года "
+                f"{p['varshesha']['winner']['planet_ru']} "
+                f"({p['varshesha']['winner']['bala']:.1f}), Мунтха {p['muntha']['sign_ru']} "
+                f"({p['muntha']['house']}-й дом), сумма знака исхода по месяцам "
+                f"{sum(m['valence'] for m in p['months']):+.1f}, средняя громкость денег "
+                f"{sum(m['salience'] for m in p['months']) / 12:.1f}, "
+                f"опорных связей {sum(1 for y in p['tajika']['yogas'] if y['present'] and y['verdict'] == 'хорошо')}, "
+                f"тяжёлых {sum(1 for y in p['tajika']['yogas'] if y['present'] and y['verdict'] == 'трудно')}"
+                for p in parts)
+            prompt = summary + "\n\n" + _COMPARE_INSTRUCT + fblock
+            msg, structured = _ask(client, prompt, ANSWER_MAX_TOKENS, _COMPARE_SCHEMA)
+            out["compare"] = _annual_payload(_text_of(msg), structured)
+        except Exception as e:
+            out["compare"] = {"_note": f"{type(e).__name__}: {e}"}
+    return out
+
 
 # ─── вопросы к альманаху ──────────────────────────────────────────────────────
 ANSWER_MAX_TOKENS = int(os.environ.get("JYOTISH_ANSWER_TOKENS", "4000"))
@@ -448,7 +637,6 @@ def _fallback(chart: dict) -> dict:
                 "Полный разбор дуги — при подключённом Claude. (шаблон)"),
       "integral": ("Тип судьбы и формула жизни рассчитываются на основе связки поле×игрок. "
                    + _why_template() + " (шаблон)"),
-      "planets": "Разбор по каждой планете доступен при подключённом Claude. (шаблон)",
     }
 
 

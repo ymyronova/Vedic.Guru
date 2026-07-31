@@ -84,6 +84,18 @@
       <span class="hint">Те же расчёты — но отобранные и объяснённые под ваш вопрос.</span>
     </div>
 
+    <!-- Годовой слой считается отдельным доменом и заметно удлиняет отчёт,
+         поэтому число частей выбирает читатель, а не мы за него. -->
+    <div class="field">
+      <label>Годовой прогноз</label>
+      <div class="focus-picker" id="years-picker" role="radiogroup" aria-label="Число годовых частей">
+        <button type="button" class="focus-opt" data-years="0">Только натал</button>
+        <button type="button" class="focus-opt active" data-years="3">3 года</button>
+        <button type="button" class="focus-opt" data-years="5">5 лет</button>
+      </div>
+      <span class="hint">Каждый год — отдельная часть: тема года, связи, помесячная разбивка. В конце — сравнение лет.</span>
+    </div>
+
     <button id="go" class="cta">Рассчитать лагну →</button>
     <!-- Показывается только тем, кто уже проходил подтверждение лагны: для них
          главная кнопка ведёт сразу к альманаху, а этот путь остаётся входом

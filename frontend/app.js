@@ -263,14 +263,31 @@ navReset("form-panel");
 // report answers a question you did not ask.
 let FOCUS = "general";
 
-document.querySelectorAll(".focus-opt").forEach(btn => {
+// Выборки ограничены своим контейнером: обе группы используют один класс, и
+// общий querySelectorAll снимал бы выделение с чужой группы, а заодно писал бы
+// в FOCUS значение из кнопки лет.
+document.querySelectorAll("#focus-picker .focus-opt").forEach(btn => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".focus-opt").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll("#focus-picker .focus-opt")
+            .forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
     FOCUS = btn.dataset.focus;
     const own = FOCUS === "other";
     $("focus-note").classList.toggle("hidden", !own);
     if (own) $("focus-note").focus();
+  });
+});
+
+// Число годовых частей. Каждая часть — отдельный расчёт и отдельный запрос к
+// модели, поэтому выбор влияет и на длину отчёта, и на время первой сборки.
+let YEARS = 3;
+
+document.querySelectorAll("#years-picker .focus-opt").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#years-picker .focus-opt")
+            .forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    YEARS = parseInt(btn.dataset.years, 10);
   });
 });
 
@@ -282,6 +299,7 @@ function birthPayload(){
     place: $("place").value.trim() || null,
     focus: FOCUS,
     focus_note: FOCUS === "other" ? $("focus-note").value.trim() : "",
+    years: YEARS,
   };
   const lat = $("lat").value, lon = $("lon").value, tz = $("tz").value.trim();
   if (lat && lon){ p.lat = parseFloat(lat); p.lon = parseFloat(lon); }
