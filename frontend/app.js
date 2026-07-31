@@ -446,6 +446,11 @@ function validBirth(p){
 
 async function buildAlmanac(p){
   lastName = p.name;
+  // A new report is a new conversation: questions asked about the previous
+  // chart must not follow the user onto a different one.
+  QA = [];
+  if ($("qa-list")) renderQA();
+  if ($("qa-err")) $("qa-err").textContent = "";
   showLoader();
   try{
     const res = await api("/api/almanac", p);
@@ -603,6 +608,88 @@ async function generateWithTime(time){
   applyReturningVisitor();
   await buildAlmanac(birthPayload());
 }
+
+// ---- questions about the almanac -------------------------------------------
+// Answers come from the same chart the report was built on, so they extend it
+// rather than contradicting it. Pairs the user ticks are re-rendered INTO the
+// document server-side, which is why they also reach the PDF and the HTML
+// download instead of living only in the interface.
+let QA = [];            // [{q, a, include}]
+
+function qaEscape(s){
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// Same treatment as the report: plain claim, term quietly in brackets.
+function qaProse(text){
+  return qaEscape(text).replace(/\(([^()]{2,140})\)/g, '<span class="jy">($1)</span>');
+}
+
+function renderQA(){
+  const list = $("qa-list");
+  list.innerHTML = "";
+  QA.forEach((item, i) => {
+    const el = document.createElement("div");
+    el.className = "qa-item";
+    el.innerHTML =
+      `<p class="qa-q">${qaEscape(item.q)}</p>` +
+      `<p class="qa-a">${qaProse(item.a)}</p>` +
+      `<div class="qa-foot">
+         <label class="qa-include"><input type="checkbox" ${item.include ? "checked" : ""}> в отчёт</label>
+         <button class="qa-drop" type="button">убрать</button>
+       </div>`;
+    el.querySelector(".qa-include input").addEventListener("change", e => {
+      QA[i].include = e.target.checked;
+      rebuildReport();
+    });
+    el.querySelector(".qa-drop").addEventListener("click", () => {
+      const wasIncluded = QA[i].include;
+      QA.splice(i, 1);
+      renderQA();
+      if (wasIncluded) rebuildReport();   // it was in the document — take it out
+    });
+    list.appendChild(el);
+  });
+}
+
+// Re-render the report with the ticked pairs. The narrative is cached server
+// side, so this costs a render rather than a generation.
+async function rebuildReport(){
+  const p = birthPayload();
+  p.qa = QA.filter(x => x.include).map(x => ({q: x.q, a: x.a}));
+  try{
+    const res = await api("/api/almanac", p);
+    lastAlmanacHtml = res.html;
+    $("frame").srcdoc = res.html;
+    const step = NAV.stack[NAV.i];
+    if (step && step.panel === "result-panel") step.data.html = res.html;
+  }catch(e){ $("qa-err").textContent = e.message; }
+}
+
+$("qa-send").addEventListener("click", async () => {
+  $("qa-err").textContent = "";
+  const q = $("qa-input").value.trim();
+  if (!q){ $("qa-err").textContent = "Напишите вопрос."; return; }
+  const btn = $("qa-send"), label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Думаю…";
+  try{
+    const p = birthPayload();
+    p.question = q;
+    p.history = QA.map(x => ({q: x.q, a: x.a}));
+    const res = await api("/api/ask", p);
+    QA.push({q, a: res.answer, include: false});
+    $("qa-input").value = "";
+    renderQA();
+  }catch(e){ $("qa-err").textContent = e.message; }
+  finally{ btn.disabled = false; btn.textContent = label; }
+});
+
+// Ctrl/Cmd+Enter sends, so a multi-line question is still easy to submit.
+$("qa-input").addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") $("qa-send").click();
+});
 
 $("restart").addEventListener("click", () => {
   // "Start over" deliberately clears history — the old steps described a run

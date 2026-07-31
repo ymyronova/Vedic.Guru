@@ -75,9 +75,22 @@ class LifeEvent(BaseModel):
     category: str | None = None     # key from rectify.EVENTS, or None to auto-classify
     note: str = ""
 
+class QAItem(BaseModel):
+    q: str = ""
+    a: str = ""
+
+class AskRequest(BirthData):
+    question: str = ""
+    history: list[QAItem] = []
+
 class RectifyRequest(BirthData):
     events: list[LifeEvent] = []
     known_time: bool = True         # False => whole-day scan
+
+class AlmanacRequest(BirthData):
+    # Пары «вопрос — ответ», которые человек выбрал вшить в отчёт. Не влияют на
+    # ключ кэша: нарратив от них не зависит, меняется только сборка документа.
+    qa: list[QAItem] = []
 
 class SynastryRequest(BaseModel):
     person_a: BirthData
@@ -143,7 +156,7 @@ def _narrative_key(kind: str, data: BirthData, loc: dict) -> str:
                          interpret.prompt_fingerprint())
 
 @app.post("/api/almanac")
-def almanac(data: BirthData, refresh: bool = False):
+def almanac(data: AlmanacRequest, refresh: bool = False):
     """Step 2: full life-path almanac as standalone HTML.
 
     Order is mandatory: расчёт → верификация → нарратив. The narrative is only
@@ -172,13 +185,55 @@ def almanac(data: BirthData, refresh: bool = False):
 
     flabel = interpret.focus_label(data.focus, data.focus_note)
     html = render.render_almanac(data.name, meta, chart, narrative,
-                                 focus=None if data.focus in (None, "", "general") else flabel)
+                                 focus=None if data.focus in (None, "", "general") else flabel,
+                                 qa=[p.model_dump() for p in data.qa])
     return {"html": html, "meta": meta, "lagna_ru": chart["ascendant"]["sign_ru"],
             "focus": flabel,
             # Reports whether Claude is usable, not merely whether a key is set.
             "has_ai": _ai_status()["status"] == "ok",
             "cached": cached,
             "verification": verification}
+
+@app.post("/api/ask")
+def ask(req: AskRequest):
+    """Вопрос к готовому альманаху.
+
+    Отвечает по тому же расчёту и в том же тоне, что и отчёт, и видит уже
+    написанный нарратив — чтобы дополнять его, а не противоречить ему.
+    Гейт верификации проходит и здесь: ответ ссылается на числа карты, значит
+    карта должна быть проверена так же, как перед нарративом.
+    """
+    q = (req.question or "").strip()
+    if not q:
+        raise HTTPException(400, "Пустой вопрос.")
+    if len(q) > 1000:
+        raise HTTPException(400, "Вопрос слишком длинный (до 1000 символов).")
+
+    chart, loc, meta, local_dt = _build(req)
+    _verified(chart, loc, local_dt)
+
+    # Тот же нарратив, что и в отчёте, если он уже есть в кэше.
+    narrative = store.get(_narrative_key("almanac", req, loc))
+
+    key = store.key_for("ask|" + q.strip().lower()[:200],
+                        req.name, req.date, req.time,
+                        loc["lat"], loc["lon"], loc["tz"],
+                        interpret.prompt_fingerprint())
+    # Кэшируем только «холодный» вопрос без истории: с историей тот же вопрос
+    # в другом контексте — это другой вопрос.
+    reusable = not req.history
+    out = store.get(key) if reusable else None
+    if out is None:
+        out = interpret.answer_question(
+            chart, q, [h.model_dump() for h in req.history],
+            req.focus, req.focus_note, narrative)
+        if reusable and not out.get("_template"):
+            store.put(key, out)
+        cached = False
+    else:
+        cached = True
+    return {"answer": out["answer"], "cached": cached,
+            "ok": not out.get("_template")}
 
 @app.get("/api/geocode")
 def geocode(place: str = ""):

@@ -259,6 +259,79 @@ def generate_almanac(chart: dict, focus: str | None = None,
         out["_note"] = f"Claude недоступен ({type(e).__name__}: {e}); показан шаблон."
         return out
 
+# ─── вопросы к альманаху ──────────────────────────────────────────────────────
+ANSWER_MAX_TOKENS = int(os.environ.get("JYOTISH_ANSWER_TOKENS", "4000"))
+
+_ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}},
+    "required": ["answer"],
+    "additionalProperties": False,
+}
+
+_ANSWER_INSTRUCT = """Ответь на вопрос человека о его карте.
+
+Правила ответа:
+— Только факты из переданного расчёта. Никаких новых чисел, знаков, домов и
+  периодов: если для ответа нужны данные, которых в расчёте нет, скажи прямо,
+  что этого в расчёте нет.
+— Тон тот же, что и в альманахе: сначала простая человеческая мысль, потом в
+  круглых скобках джйотиш-параметр, из которого она следует.
+— Если вопрос вообще не про карту (например, про сервис или про то, как читать
+  отчёт) — просто ответь по-человечески, скобки тогда не нужны.
+— Если вопрос просит предсказать событие или принять решение за человека,
+  ответь тем, что карта показывает как склонность и время, и верни решение
+  человеку. Это не предсказание.
+— Коротко: 1–3 абзаца. Человек уже прочитал альманах, повторять его не нужно."""
+
+
+def answer_question(chart: dict, question: str, history: list | None = None,
+                    focus: str | None = None, focus_note: str = "",
+                    narrative: dict | None = None) -> dict:
+    """Ответ на вопрос о карте, опирающийся на тот же расчёт, что и альманах."""
+    q = (question or "").strip()
+    if not q:
+        return {"_template": True, "answer": "Вопрос пустой."}
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return {"_template": True,
+                "answer": "Ответы на вопросы работают при подключённом Claude. "
+                          + _why_template()}
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=key)
+
+        parts = [_facts(chart)]
+        if narrative:
+            # Answers should extend the report, not contradict it, so the model
+            # sees what it already said rather than re-deriving from scratch.
+            told = "\n\n".join(f"[{k}] {str(narrative.get(k, ''))[:1200]}"
+                               for k in ALMANAC_KEYS if narrative.get(k))
+            if told:
+                parts.append("УЖЕ НАПИСАНО В АЛЬМАНАХЕ (не повторяй, опирайся):\n" + told)
+        for turn in (history or [])[-6:]:      # keep the thread, bound the prompt
+            qq = str(turn.get("q", ""))[:500]
+            aa = str(turn.get("a", ""))[:1500]
+            if qq and aa:
+                parts.append(f"РАНЕЕ СПРОСИЛИ: {qq}\nВЫ ОТВЕТИЛИ: {aa}")
+        parts.append(_ANSWER_INSTRUCT + _focus_block(focus, focus_note))
+        parts.append("ВОПРОС: " + q[:1000])
+
+        msg, structured = _ask(client, "\n\n".join(parts),
+                               ANSWER_MAX_TOKENS, _ANSWER_SCHEMA)
+        text = _text_of(msg)
+        if not structured:
+            text = text.strip().removeprefix("```json").removeprefix("```") \
+                       .removesuffix("```").strip()
+        data = json.loads(text)
+        if not str(data.get("answer", "")).strip():
+            raise NarrativeError("пустой ответ")
+        return {"answer": data["answer"]}
+    except Exception as e:
+        return {"_template": True,
+                "answer": f"Не удалось получить ответ ({type(e).__name__}: {e})."}
+
+
 def rectify_description(chart: dict) -> dict:
     """Step-1 lagna description + two neighbours. Uses Claude if available, else template."""
     a = chart["ascendant"]; key = os.environ.get("ANTHROPIC_API_KEY")

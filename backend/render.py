@@ -199,7 +199,33 @@ def _section5_table(chart, player):
                f"<td class='mono'>{player[h]:.1f}</td><td><span class='tag {cls}'>{name}</span></td></tr>")
     return rows
 
-def render_almanac(name, birth_meta, chart, narrative, focus=None):
+def _qa_section(qa, num):
+    """Раздел «Ваши вопросы» — только то, что человек сам выбрал добавить.
+
+    Вопросы включаются в документ, поэтому попадают и в PDF, и в скачанный
+    HTML: разговор становится частью отчёта, а не остаётся в интерфейсе.
+    """
+    if not qa:
+        return ""
+    esc = _h.escape
+    items = ""
+    for pair in qa:
+        q = str(pair.get("q", "")).strip()
+        a = str(pair.get("a", "")).strip()
+        if not q or not a:
+            continue
+        items += (f"<div class='card'><p style='margin:0 0 8px'>"
+                  f"<b>{esc(q)}</b></p>"
+                  f"<p class='prose' style='margin:0'>{_prose(a)}</p></div>")
+    if not items:
+        return ""
+    return (f"""<section><div class="sec-head"><div class="sec-num">{num}</div>
+      <h2>Ваши вопросы</h2></div>
+      <p class="sec-intro">Заданы вами после прочтения альманаха; ответы опираются
+      на тот же расчёт.</p>{items}</section>""")
+
+
+def render_almanac(name, birth_meta, chart, narrative, focus=None, qa=None):
     esc=_h.escape
     bubble, player = bubble_svg(chart)
     a=chart["ascendant"]
@@ -245,6 +271,7 @@ def render_almanac(name, birth_meta, chart, narrative, focus=None):
     # 6 planets
     parts.append(f"""<section><div class="sec-head"><div class="sec-num">6</div><h2>Как держать каждую планету в высшем состоянии</h2></div>
       <p class="prose">{_prose(narrative.get('planets',''))}</p></section>""")
+    parts.append(_qa_section(qa, 7))
     note = narrative.get("_note","")
     parts.append(f"""<div class="foot">ДЖЙОТИШ-АЛЬМАНАХ · {esc(name)}<br>
       Лахири (сидерик) · цельнознаковые дома · Вимшопака по Шодашаварге · SAV · Вимшоттари · Swiss Ephemeris<br>

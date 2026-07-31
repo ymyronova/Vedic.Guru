@@ -180,6 +180,20 @@
     <!-- Показывается только если серверная сборка PDF не сработала; текст
          подставляется из app.js вместе с причиной. -->
     <p class="hint print-hint hidden" id="print-hint"></p>
+
+    <!-- Вопросы к альманаху. Отмеченные пары вшиваются в сам документ, поэтому
+         попадают и в PDF, и в скачанный HTML. -->
+    <div class="qa">
+      <h3 class="qa-title">Спросить об альманахе</h3>
+      <p class="hint">Ответы опираются на тот же расчёт. Отмеченные вопросы войдут в отчёт.</p>
+      <div id="qa-list"></div>
+      <div class="qa-ask">
+        <textarea id="qa-input" rows="2" maxlength="1000"
+                  placeholder="Например: что означает Сатурн в 7-м доме для партнёрства?"></textarea>
+        <button id="qa-send" class="cta">Спросить</button>
+      </div>
+      <p class="err" id="qa-err"></p>
+    </div>
     <iframe id="frame" title="almanac"></iframe>
   </section>
 
