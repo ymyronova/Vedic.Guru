@@ -314,35 +314,82 @@ async function api(path, body){
   return data;
 }
 
-// ---- Step 1: rectify ----
-$("go").addEventListener("click", async () => {
-  $("err").textContent = "";
-  const p = birthPayload();
-  if (!p.date){ $("err").textContent = "Укажите дату рождения."; return; }
+// ---- lagna step: first-timers only ----------------------------------------
+// Confirming the lagna is orientation, not a calculation input: it exists so a
+// newcomer can sanity-check the birth time before a long generation. Someone
+// who has already been through it once knows their lagna, so the step is pure
+// friction — and it costs a Claude call. Returning visitors go straight to the
+// almanac, with "Сначала уточнить лагну" left as the way back in, since that
+// panel is also the only entrance to event-based rectification.
+const SEEN_LAGNA_KEY = "jyotish.seenLagnaStep";
+const seenLagnaStep = () => {
+  // Storage throws in private mode; treat that as a first visit. Showing the
+  // step again is harmless, an exception in the main button is not.
+  try { return localStorage.getItem(SEEN_LAGNA_KEY) === "1"; }
+  catch { return false; }
+};
+const markLagnaSeen = () => {
+  try { localStorage.setItem(SEEN_LAGNA_KEY, "1"); } catch {}
+};
+
+function applyReturningVisitor(){
+  const returning = seenLagnaStep();
+  $("go").textContent = returning ? "Собрать альманах →" : "Рассчитать лагну →";
+  $("go-lagna").classList.toggle("hidden", !returning);
+}
+applyReturningVisitor();
+
+function validBirth(p){
+  if (!p.date){ $("err").textContent = "Укажите дату рождения."; return false; }
   if (!p.place && !(Number.isFinite(p.lat) && Number.isFinite(p.lon))){
-    $("err").textContent = "Укажите место рождения или координаты."; return; }
+    $("err").textContent = "Укажите место рождения или координаты."; return false; }
+  return true;
+}
+
+async function buildAlmanac(p){
+  lastName = p.name;
+  showLoader();
+  try{
+    const res = await api("/api/almanac", p);
+    navGo("result-panel", {html: res.html, name: p.name});
+    markLagnaSeen();          // they have now seen a finished chart
+    applyReturningVisitor();
+    if (!res.has_ai){
+      console.info("Claude недоступен — тексты в шаблонном режиме. Подробности: /api/ai");
+    }
+  }catch(e){ alert(e.message); }
+  finally{ hideLoader(); }
+}
+
+async function goToLagna(p){
   showLoader();
   try{
     const res = await api("/api/rectify", p);
     navGo("rectify-panel", res);
   }catch(e){ $("err").textContent = e.message; }
   finally{ hideLoader(); }
+}
+
+// ---- Step 1 ----
+$("go").addEventListener("click", async () => {
+  $("err").textContent = "";
+  const p = birthPayload();
+  if (!validBirth(p)) return;
+  if (seenLagnaStep()) await buildAlmanac(p);   // skip the confirmation
+  else await goToLagna(p);
+});
+
+// Explicit way back to the lagna step, and thus to event rectification.
+$("go-lagna").addEventListener("click", async () => {
+  $("err").textContent = "";
+  const p = birthPayload();
+  if (!validBirth(p)) return;
+  await goToLagna(p);
 });
 
 // ---- Step 2: full almanac ----
 $("confirm-yes").addEventListener("click", async () => {
-  const p = birthPayload();
-  lastName = p.name;
-  showLoader();
-  try{
-    const res = await api("/api/almanac", p);
-    navGo("result-panel", {html: res.html, name: p.name});
-    if (!res.has_ai){
-      // gentle notice if API key not set
-      console.info("Claude недоступен — тексты в шаблонном режиме. Подробности: /api/ai");
-    }
-  }catch(e){ alert(e.message); }
-  finally{ hideLoader(); }
+  await buildAlmanac(birthPayload());
 });
 
 // ---- Step 1.2: event-based rectification ----
@@ -433,14 +480,7 @@ function renderRanked(r){
 async function generateWithTime(time){
   $("time").value = time;
   const un = $("unknown-time"); if (un) un.checked = false;
-  const p = birthPayload();
-  lastName = p.name;
-  showLoader();
-  try{
-    const res = await api("/api/almanac", p);
-    navGo("result-panel", {html: res.html, name: p.name});
-  }catch(e){ alert(e.message); }
-  finally{ hideLoader(); }
+  await buildAlmanac(birthPayload());
 }
 
 $("restart").addEventListener("click", () => {

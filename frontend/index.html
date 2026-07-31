@@ -53,6 +53,12 @@
       <div class="field"><label>Часовой пояс (IANA, необязательно)</label><input id="tz" type="text" placeholder="авто"></div>
     </details>
     <button id="go" class="cta">Рассчитать лагну →</button>
+    <!-- Показывается только тем, кто уже проходил подтверждение лагны: для них
+         главная кнопка ведёт сразу к альманаху, а этот путь остаётся входом
+         в ректификацию по событиям, если время рождения неточное. -->
+    <button id="go-lagna" class="ghost hidden" style="width:100%;margin-top:10px">
+      Сначала уточнить лагну
+    </button>
     <p class="err" id="err"></p>
   </section>
 
