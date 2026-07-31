@@ -1,20 +1,36 @@
-/* Светлая «бумажная» тема — та же палитра, что у альманаха (backend/theme.py),
-   чтобы документ в iframe не выглядел вставкой из другого продукта. */
+/* Vedic Guru brand book — 03 Color (P2 · locked) и 04 Typography (T1 · locked).
+   Та же палитра, что у альманаха (backend/theme.py), чтобы документ в iframe
+   не выглядел вставкой из другого продукта.
+
+   Paper ~70% макета · Leaf — вторые поверхности и зебра · Ink — текст и линии ·
+   Meridian ≤10%, только вычисленные значения и главное действие.
+   Пар «зелёный/красный» нет: ни одно значение в карте не хорошая и не плохая
+   новость — сила передаётся интенсивностью одного тона. */
 :root{
-  --paper:#eef0ec; --panel:#ffffff; --panel2:#f6f8f4;
-  --accent:#6e5624; --accent2:#6b5423;
-  --wash:rgba(138,109,47,.08); --soft:rgba(138,109,47,.16);
-  --ink:#252a22; --muted:#525a4e; --faint:#5c6356;
-  --line:rgba(138,109,47,.28); --line-soft:rgba(138,109,47,.18);
-  --green:#2f6340; --blue:#2e567c; --yellow:#7f6517; --red:#8c3838;
-  --serif:'DejaVu Serif',Georgia,'Times New Roman',serif;
-  --display:'FreeSerif','DejaVu Serif',Georgia,serif;
-  --mono:'DejaVu Sans Mono',ui-monospace,'Courier New',monospace;
+  --paper:#F7F8F6; --panel:#FFFFFF; --panel2:#E7EAE7;
+  --accent:#1E7A7F; --accent2:#135A5E; --shoal:#6FAFAF;
+  --wash:rgba(30,122,127,.07); --soft:rgba(30,122,127,.14);
+  --ink:#16201F; --body:#454F4D; --muted:#454F4D; --faint:#7C8683;
+  --line:#D3DAD7; --line-soft:#E7EAE7;
+  /* шкала силы: Meridian → нейтральный, без оценочных цветов */
+  --q4:#1E7A7F; --q3:#4E9497; --q2:#93B7B6; --q1:#96A09D;
+  --green:var(--q4); --blue:var(--q3); --yellow:var(--q2); --red:var(--q1);
+  /* Newsreader — заголовки; Helvetica Neue — интерфейс; IBM Plex Mono — числа.
+     Локальные запасные обязательны: PDF собирается без веб-шрифтов. */
+  --display:'Newsreader','DejaVu Serif',Georgia,serif;
+  --sans:'Helvetica Neue',Helvetica,Arial,'DejaVu Sans',sans-serif;
+  --serif:var(--sans);
+  --mono:'IBM Plex Mono','DejaVu Sans Mono',ui-monospace,'Courier New',monospace;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{margin:0;min-height:100vh;background:var(--paper);color:var(--ink);
-  font-family:var(--serif);line-height:1.68;-webkit-font-smoothing:antialiased;}
+/* Body 17 / 1.65 по шкале бренда; текст #454F4D, Ink оставлен структуре. */
+body{margin:0;min-height:100vh;background:var(--paper);color:var(--body);
+  font-family:var(--sans);font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;}
+/* Каждое вычисленное значение — моноширинное и табличное, чтобы колонки
+   выравнивались и два отчёта можно было сравнить, не перечитывая. */
+.mono,.geo,.meta,.rank .meta,.conf,.legend{font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1;}
 .wrap{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:0 22px 80px;
   transition:max-width .25s ease;}
 /* The almanac is a document, not a form. At 760px the iframe was ~660px wide, so
@@ -22,19 +38,32 @@ body{margin:0;min-height:100vh;background:var(--paper);color:var(--ink);
    chart rendered cramped. Only the result step widens; input stays narrow, where
    a short line length is easier to fill in. */
 body.wide .wrap{max-width:min(96vw,1340px);}
-h1,h2,.disp{font-family:var(--display);font-weight:600;letter-spacing:.2px;color:var(--ink);}
+/* Newsreader в лёгких начертаниях, как в бренд-буке (200/300/400). */
+h1,h2,.disp{font-family:var(--display);font-weight:300;color:var(--ink);}
+h2{font-size:34px;line-height:1.15;letter-spacing:-.015em;}
 
 .hero{text-align:center;padding:56px 0 30px;}
-.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:5px;text-transform:uppercase;color:var(--accent);}
-.hero h1{font-size:clamp(42px,9vw,72px);line-height:1;margin:.14em 0 .12em;color:var(--accent);}
-.tagline{max-width:520px;margin:0 auto;color:var(--muted);font-size:17px;font-style:italic;}
+/* Eyebrow / data label — 10.5 / +16% трекинга, моно. */
+.eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--faint);}
+/* Manifesto — 56 / 1.05 / -2.5%. Ink, не акцент: Meridian отведён вычисленным
+   значениям и главному действию, не заголовкам. */
+.hero h1{font-size:clamp(42px,9vw,56px);line-height:1.05;letter-spacing:-.025em;
+  margin:.14em 0 .12em;font-weight:200;color:var(--ink);}
+.tagline{max-width:560px;margin:0 auto;color:var(--muted);font-size:17px;line-height:1.65;}
 
-#fatal-banner{display:none;position:fixed;top:0;left:0;right:0;z-index:50;background:var(--red);color:#fff;
+/* Системная ошибка — это не «плохая новость о карте», а сбой приложения, и она
+   обязана быть заметна. В палитре бренда нет цвета ошибки, поэтому берём
+   максимальный контраст самой палитры (Ink на Paper, 15.8:1) и вес, а не
+   изобретаем красный. */
+#fatal-banner{display:none;position:fixed;top:0;left:0;right:0;z-index:50;
+  background:var(--ink);color:var(--paper);
   font-family:var(--mono);font-size:13px;padding:12px 16px;line-height:1.5;white-space:pre-wrap;}
 #fatal-banner.show{display:block;}
 #status-dot{font-size:11px;color:var(--faint);transition:color .3s;}
-#status-dot.ok{color:var(--green);} #status-dot.bad{color:var(--red);}
-#status-dot.warn{color:var(--yellow);}
+#status-dot.ok{color:var(--accent);}      /* Meridian: всё вычисляется */
+#status-dot.warn{color:var(--faint);}     /* шаблонный режим — не тревога */
+#status-dot.bad{color:var(--ink);}        /* нет связи — максимальный контраст */
 
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;
   padding:28px 28px 30px;margin:22px 0;box-shadow:0 2px 10px rgba(0,0,0,.05);}
@@ -66,8 +95,8 @@ input#time:disabled{opacity:.45;cursor:not-allowed;}
   text-decoration-color:var(--line);transition:color .2s,text-decoration-color .2s;}
 .linklike:hover{color:var(--accent);text-decoration-color:var(--accent);}
 .geo{display:block;font-size:12.5px;margin-top:6px;color:var(--muted);min-height:1em;line-height:1.35;}
-.geo.ok{color:var(--green);}
-.geo.bad{color:var(--red);}
+.geo.ok{color:var(--accent);}   /* координаты вычислены — Meridian по назначению */
+.geo.bad{color:var(--ink);}     /* не нашли город: сбой ввода, не «плохая карта» */
 .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 @media(max-width:520px){.row{grid-template-columns:1fr}}
 .manual{margin:2px 0 18px;border-top:1px dashed var(--line);padding-top:12px;}
@@ -83,7 +112,9 @@ input#time:disabled{opacity:.45;cursor:not-allowed;}
   border-radius:6px;font-family:var(--mono);font-size:12.5px;letter-spacing:.5px;
   padding:10px 16px;cursor:pointer;transition:border-color .2s,color .2s,background .2s;}
 .ghost:hover{border-color:var(--accent);background:var(--wash);}
-.err{color:var(--red);font-size:14px;margin:12px 0 0;min-height:1em;}
+.err{color:var(--ink);font-weight:500;font-size:13.5px;line-height:1.55;
+  margin:12px 0 0;min-height:1em;}
+.err:not(:empty){border-left:3px solid var(--ink);padding-left:12px;}
 
 .hidden{display:none !important;}
 .rc-head{display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;}
@@ -152,12 +183,15 @@ body.wide #result-panel{padding-left:16px;padding-right:16px;}
   color:var(--ink);font-family:var(--serif);font-size:14px;padding:9px 10px;outline:none;}
 .ev-row select{cursor:pointer;} .ev-row input:focus,.ev-row select:focus{border-color:var(--accent);}
 .ev-del{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:5px;
-  cursor:pointer;font-size:16px;line-height:1;padding:6px;} .ev-del:hover{border-color:var(--red);color:var(--red);}
+  cursor:pointer;font-size:16px;line-height:1;padding:6px;} .ev-del:hover{border-color:var(--ink);color:var(--ink);}
 
 .conf{font-family:var(--mono);font-size:11px;letter-spacing:1px;text-transform:uppercase;
   padding:3px 12px;border-radius:20px;border:1px solid var(--line);margin-left:auto;}
-.conf.high{color:var(--green);border-color:var(--green);} .conf.mid{color:var(--accent2);}
-.conf.low{color:var(--red);border-color:var(--red);}
+/* Уверенность ректификации — «estimated · probabilistic · bounded» по бренду.
+   Это оценка, а не приговор, поэтому шкала интенсивности, а не красный. */
+.conf.high{color:var(--q4);border-color:var(--q4);}
+.conf.mid{color:var(--q3);border-color:var(--q3);}
+.conf.low{color:var(--q1);border-color:var(--q1);}
 .rank{display:flex;align-items:center;gap:14px;border:1px solid var(--line);border-radius:7px;
   padding:14px 16px;margin-bottom:10px;background:var(--panel);transition:border-color .2s;}
 .rank:hover{border-color:var(--accent);}

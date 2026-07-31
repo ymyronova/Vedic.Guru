@@ -10,11 +10,17 @@ PL_ABBR = {"Su":"Со","Mo":"Лу","Ma":"Ма","Me":"Ме","Ju":"Ю","Ve":"Ве"
 _SERIF, _DISPLAY, _MONO = theme.FONT_SERIF, theme.FONT_DISPLAY, theme.FONT_MONO
 
 def _q(f, p):
+    """Квадрант «поле × игрок».
+
+    Бренд-бук: «no red / green success-failure pairs — nothing here is good or
+    bad news». Поэтому четыре состояния различаются интенсивностью одного тона,
+    от Meridian до нейтрального, а не сменой цвета с зелёного на красный.
+    """
     fs = f >= 28; ps = p >= 12.6
-    if fs and ps: return theme.GREEN, "реализованная"
-    if not fs and ps: return theme.BLUE, "спасена игроком"
-    if fs and not ps: return theme.YELLOW, "потенциал без ключа"
-    return theme.RED, "уязвимость"
+    if fs and ps:     return theme.Q_BOTH,    "реализованная"
+    if not fs and ps: return theme.Q_PLAYER,  "держит игрок"
+    if fs and not ps: return theme.Q_FIELD,   "держит поле"
+    return theme.Q_NEITHER, "зона роста"
 
 def natal_svg(chart):
     S=96; W=H=S*4
@@ -54,13 +60,13 @@ def vimshopaka_svg(chart):
     order=sorted(((PL_RU[k],v) for k,v in vb.items()), key=lambda x:-x[1])
     W,H=560,300; x0=112; barmax=W-x0-40; top=18; bh=26; gap=12
     p=[f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" class="chart">']
-    for thr,lbl,col in [(15,"15",theme.GREEN),(12.5,"12.5",theme.ACCENT),(10,"10",theme.RED)]:
+    for thr,lbl,col in [(15,"15",theme.Q_BOTH),(12.5,"12.5",theme.Q_PLAYER),(10,"10",theme.Q_NEITHER)]:
         gx=x0+barmax*thr/20
         p.append(f'<line x1="{gx:.1f}" y1="{top-6}" x2="{gx:.1f}" y2="{top+7*(bh+gap)-gap+6}" stroke="{col}" stroke-dasharray="3 4" stroke-width="1" opacity="0.55"/>')
         p.append(f'<text x="{gx:.1f}" y="{top+7*(bh+gap)-gap+20}" fill="{col}" font-size="10" text-anchor="middle" font-family="{_MONO}">{lbl}</text>')
     for i,(name,val) in enumerate(order):
         y=top+i*(bh+gap); w=barmax*val/20
-        c=theme.GREEN if val>=15 else theme.ACCENT if val>=12.5 else theme.YELLOW if val>=10 else theme.RED
+        c=theme.Q_BOTH if val>=15 else theme.Q_PLAYER if val>=12.5 else theme.Q_FIELD if val>=10 else theme.Q_NEITHER
         p.append(f'<text x="{x0-10}" y="{y+bh*0.68:.0f}" fill="{theme.INK}" font-size="13" text-anchor="end" font-family="{_SERIF}">{name}</text>')
         p.append(f'<rect x="{x0}" y="{y}" width="{w:.1f}" height="{bh}" rx="3" fill="{c}"/>')
         p.append(f'<text x="{x0+w+8:.1f}" y="{y+bh*0.68:.0f}" fill="{theme.ACCENT2}" font-size="12" font-family="{_MONO}">{val:.2f}</text>')
@@ -75,7 +81,7 @@ def sav_svg(chart):
     p.append(f'<text x="{x0+12*(bw+gap)+2:.0f}" y="{yavg+4:.0f}" fill="{theme.ACCENT}" font-size="10" font-family="{_MONO}">{avg:.0f}</text>')
     for h in range(1,13):
         v=SAV[h]; x=x0+(h-1)*(bw+gap); bh=v*scale; y=y0-bh
-        c=theme.GREEN if v>=30 else theme.ACCENT if v>=25 else theme.RED
+        c=theme.Q_BOTH if v>=30 else theme.Q_PLAYER if v>=25 else theme.Q_NEITHER
         p.append(f'<rect x="{x}" y="{y:.1f}" width="{bw}" height="{bh:.1f}" rx="2" fill="{c}"/>')
         p.append(f'<text x="{x+bw/2:.0f}" y="{y-5:.0f}" fill="{theme.INK}" font-size="11" text-anchor="middle" font-family="{_MONO}">{v}</text>')
         p.append(f'<text x="{x+bw/2:.0f}" y="{y0+16:.0f}" fill="{theme.MUTED}" font-size="11" text-anchor="middle" font-family="{_MONO}">{h}</text>')
@@ -103,10 +109,10 @@ def bubble_svg(chart):
     p.append(f'<rect x="{ml}" y="{mt}" width="{W-ml-mr}" height="{H-mb-mt}" fill="{theme.PANEL}" stroke="{theme.LINE}"/>')
     p.append(f'<line x1="{xc:.0f}" y1="{mt}" x2="{xc:.0f}" y2="{H-mb}" stroke="{theme.LINE}" stroke-dasharray="4 4"/>')
     p.append(f'<line x1="{ml}" y1="{yc:.0f}" x2="{W-mr}" y2="{yc:.0f}" stroke="{theme.LINE}" stroke-dasharray="4 4"/>')
-    p.append(f'<text x="{ml+8}" y="{mt+16}" fill="{theme.BLUE}" font-size="10" font-family="{_SERIF}">спасено игроком</text>')
-    p.append(f'<text x="{W-mr-8}" y="{mt+16}" fill="{theme.GREEN}" font-size="10" text-anchor="end" font-family="{_SERIF}">реализованная сила</text>')
-    p.append(f'<text x="{ml+8}" y="{H-mb-6}" fill="{theme.RED}" font-size="10" font-family="{_SERIF}">уязвимость</text>')
-    p.append(f'<text x="{W-mr-8}" y="{H-mb-6}" fill="{theme.YELLOW}" font-size="10" text-anchor="end" font-family="{_SERIF}">потенциал без ключа</text>')
+    p.append(f'<text x="{ml+8}" y="{mt+16}" fill="{theme.Q_PLAYER}" font-size="10" font-family="{_SERIF}">держит игрок</text>')
+    p.append(f'<text x="{W-mr-8}" y="{mt+16}" fill="{theme.Q_BOTH}" font-size="10" text-anchor="end" font-family="{_SERIF}">реализованная сила</text>')
+    p.append(f'<text x="{ml+8}" y="{H-mb-6}" fill="{theme.Q_NEITHER}" font-size="10" font-family="{_SERIF}">зона роста</text>')
+    p.append(f'<text x="{W-mr-8}" y="{H-mb-6}" fill="{theme.Q_FIELD}" font-size="10" text-anchor="end" font-family="{_SERIF}">держит поле</text>')
     p.append(f'<text x="{(ml+W-mr)/2:.0f}" y="{H-14}" fill="{theme.MUTED}" font-size="12" text-anchor="middle" font-family="{_SERIF}">Сила ПОЛЯ (бинду) →</text>')
     p.append(f'<text x="18" y="{(mt+H-mb)/2:.0f}" fill="{theme.MUTED}" font-size="12" text-anchor="middle" font-family="{_SERIF}" transform="rotate(-90 18 {(mt+H-mb)/2:.0f})">Сила ИГРОКА (Вимшопака) →</text>')
     for h in range(1,13):

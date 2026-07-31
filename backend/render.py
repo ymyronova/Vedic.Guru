@@ -17,22 +17,45 @@ def _prose(text: str) -> str:
     return _JY_TERM.sub(r'<span class="jy">(\1)</span>', _h.escape(text or ""))
 
 CSS = """
+/* Vedic Guru brand book — 03 Color (P2 · locked).
+   Paper ~70%% of any layout · Leaf for second surfaces and table zebra ·
+   Ink for type and rules · Meridian ≤10%%, only on computed values and the
+   primary action. No red/green pairs: nothing here is good or bad news. */
 :root{--paper:%(PAPER)s;--panel:%(PANEL)s;--panel2:%(PANEL2)s;
 --accent:%(ACCENT)s;--accent2:%(ACCENT2)s;--wash:%(ACCENT_WASH)s;--soft:%(ACCENT_SOFT)s;
---ink:%(INK)s;--muted:%(MUTED)s;--faint:%(FAINT)s;
+--ink:%(INK)s;--body:%(BODY)s;--muted:%(MUTED)s;--faint:%(FAINT)s;
 --line:%(LINE)s;--line-soft:%(LINE_SOFT)s;
---green:%(GREEN)s;--blue:%(BLUE)s;--yellow:%(YELLOW)s;--red:%(RED)s;--saturn:%(SATURN)s;}
+--q4:%(Q_BOTH)s;--q3:%(Q_PLAYER)s;--q2:%(Q_FIELD)s;--q1:%(Q_NEITHER)s;
+/* прежние семантические имена указывают на ту же шкалу, чтобы ни одна
+   ссылка не осталась висящей и ни один «зелёный» не вернулся */
+--green:%(Q_BOTH)s;--blue:%(Q_PLAYER)s;--yellow:%(Q_FIELD)s;--red:%(Q_NEITHER)s;
+--saturn:%(SATURN)s;}
 *{box-sizing:border-box}
-body{margin:0;background:var(--paper);color:var(--ink);
-font-family:%(SERIF)s;line-height:1.68;-webkit-font-smoothing:antialiased;}
+/* 04 Typography: Helvetica Neue — body copy, navigation, buttons, forms.
+   Body 17 / 1.65. Ink for structure, #454F4D for running text. */
+body{margin:0;background:var(--paper);color:var(--body);
+font-family:%(SANS)s;font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;}
 .wrap{max-width:940px;margin:0 auto;padding:0 24px 60px;}
-h1,h2,h3,.disp{font-family:%(DISPLAY)s;font-weight:600;letter-spacing:.2px;color:var(--ink);}
-.mono{font-family:%(MONO)s;}
-.jy{color:var(--faint);font-size:.86em;font-style:italic;}
+/* Newsreader — headlines, manifesto, pull quotes, report titles. Light weights
+   by brand (200/300/400); tight tracking at display sizes. */
+h1,h2,h3,.disp{font-family:%(DISPLAY)s;font-weight:300;color:var(--ink);}
+h2{font-size:34px;line-height:1.15;letter-spacing:-.015em;}
+h3{font-size:22px;line-height:1.3;letter-spacing:0;}
+/* Every computed value is monospaced AND tabular, so columns align and two
+   reports can be compared without re-reading. */
+.mono,td.mono,th.mono,.grid,.legend,.foot{font-family:%(MONO)s;
+font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;}
+/* 05 Voice: plain language first, the term after — italic, one step lighter,
+   never bold, never capitalised mid-sentence. */
+.jy{color:var(--faint);font-size:.86em;font-style:italic;font-weight:400;}
 
 .hero{padding:40px 0 26px;text-align:center;}
-.hero .eyebrow{font-family:%(MONO)s;font-size:10px;letter-spacing:5px;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}
-.hero h1{font-size:clamp(38px,7.5vw,64px);line-height:1;margin:.1em 0;color:var(--accent);}
+/* Eyebrow / data label — 10.5 / +16%% tracking, mono. */
+.hero .eyebrow{font-family:%(MONO)s;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:10px;}
+/* Manifesto — 56 / 1.05 / -2.5%%. Ink, not accent: Meridian is reserved for
+   computed values and the primary action, capped at ~10%% of the layout. */
+.hero h1{font-size:clamp(38px,7.5vw,56px);line-height:1.05;letter-spacing:-.025em;
+margin:.1em 0;font-weight:200;color:var(--ink);}
 .hero .sub{color:var(--muted);font-size:17px;font-style:italic;margin-bottom:6px;}
 .hero .meta{margin-top:10px;font-family:%(MONO)s;font-size:11px;color:var(--faint);letter-spacing:1px;}
 .focus-badge{display:inline-block;margin-top:16px;padding:5px 18px;border:1px solid var(--line);border-radius:20px;
@@ -55,8 +78,10 @@ p{margin:0 0 15px;} .prose{font-size:16.5px;white-space:pre-wrap;}
 background:var(--panel);font-size:17px;line-height:1.76;text-align:left;color:var(--ink);}
 .thread .lead::first-letter{font-family:%(DISPLAY)s;font-size:3.1em;float:left;line-height:.82;padding:6px 10px 0 0;color:var(--accent);}
 .callout{border-left:4px solid var(--accent);padding:12px 0 12px 18px;margin:20px 0;color:var(--accent2);background:var(--wash);font-style:normal;}
-.highlight{border-left:4px solid var(--green);padding:12px 0 12px 18px;margin:20px 0;color:#255c38;background:rgba(61,125,82,.08);}
-.warn{border-left:4px solid var(--yellow);padding:14px 0 14px 18px;margin:20px 0;color:#7a6212;background:rgba(168,134,31,.09);}
+/* Выноски различаются насыщенностью подложки и толщиной линии, а не цветом:
+   ни один блок отчёта не является «хорошей» или «плохой» новостью. */
+.highlight{border-left:4px solid var(--accent);padding:12px 0 12px 18px;margin:20px 0;color:var(--ink);background:var(--wash);}
+.warn{border-left:4px solid var(--q1);padding:14px 0 14px 18px;margin:20px 0;color:var(--ink);background:var(--panel2);}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 @media(max-width:700px){.grid2{grid-template-columns:1fr}}
 
@@ -74,13 +99,14 @@ tr:nth-child(even) td{background:var(--panel2);}
 .pill{display:inline-block;font-family:%(MONO)s;font-size:10px;padding:2px 8px;border-radius:20px;
 border:1px solid var(--line);color:var(--accent2);margin-right:4px;}
 .dasha-now td{background:var(--soft) !important;}
-.dasha-peak td{background:rgba(61,125,82,.13) !important;}
-.hl-green td{background:rgba(61,125,82,.12) !important;}
-.hl-amber td{background:rgba(168,134,31,.12) !important;}
-.hl-red td{background:rgba(168,69,69,.09) !important;}
+/* Подсветка строк — та же шкала интенсивности, что и у квадрантов. */
+.dasha-peak td{background:var(--wash) !important;}
+.hl-green td{background:var(--wash) !important;}
+.hl-amber td{background:var(--panel2) !important;}
+.hl-red td{background:var(--panel2) !important;}
 
 .planet-block{margin:14px 0;border:1px solid var(--line);border-radius:5px;overflow:hidden;background:var(--panel);}
-.planet-head{display:flex;align-items:center;gap:12px;padding:13px 20px;background:rgba(138,109,47,.10);border-bottom:1px solid var(--line);}
+.planet-head{display:flex;align-items:center;gap:12px;padding:13px 20px;background:var(--wash);border-bottom:1px solid var(--line);}
 .planet-head .gl{font-size:21px;color:var(--accent2);}
 .planet-head .nm{font-family:%(DISPLAY)s;font-size:22px;color:var(--ink);}
 .planet-head .vb{margin-left:auto;font-family:%(MONO)s;font-size:11px;color:var(--accent2);text-align:right;}
@@ -89,7 +115,12 @@ border:1px solid var(--line);color:var(--accent2);margin-right:4px;}
 .planet-body p{font-size:14.5px;margin:0 0 6px;}
 .acc-green{border-left:4px solid var(--green);}.acc-amber{border-left:4px solid var(--yellow);}.acc-red{border-left:4px solid var(--red);}
 
-.tag{color:var(--green)} .tag.w{color:var(--red)} .tag.m{color:#8a6d10} .tag.b{color:var(--blue)} .tag.s{color:var(--saturn)}
+/* Сила читается интенсивностью одного тона, а не сменой цвета: бренд-бук
+   запрещает пары «зелёный — красный», потому что ни один дом не является
+   хорошей или плохой новостью. */
+.tag{font-family:%(MONO)s;font-size:11px;letter-spacing:.4px;}
+.tag.q4{color:%(Q_BOTH)s} .tag.q3{color:%(Q_PLAYER)s}
+.tag.q2{color:%(Q_FIELD)s} .tag.q1{color:%(Q_NEITHER)s}
 .foot{margin-top:40px;padding-top:20px;border-top:2px solid var(--line);font-size:11.5px;color:var(--faint);
 font-family:%(MONO)s;line-height:1.9;}
 
@@ -109,18 +140,24 @@ thead{display:table-header-group;}
     "PAPER": theme.PAPER, "PANEL": theme.PANEL, "PANEL2": theme.PANEL2,
     "ACCENT": theme.ACCENT, "ACCENT2": theme.ACCENT2,
     "ACCENT_WASH": theme.ACCENT_WASH, "ACCENT_SOFT": theme.ACCENT_SOFT,
-    "INK": theme.INK, "MUTED": theme.MUTED, "FAINT": theme.FAINT,
+    "INK": theme.INK, "BODY": theme.BODY, "MUTED": theme.MUTED, "FAINT": theme.FAINT,
     "LINE": theme.LINE, "LINE_SOFT": theme.LINE_SOFT,
-    "GREEN": theme.GREEN, "BLUE": theme.BLUE, "YELLOW": theme.YELLOW,
-    "RED": theme.RED, "SATURN": theme.SATURN,
-    "SERIF": theme.FONT_SERIF, "DISPLAY": theme.FONT_DISPLAY, "MONO": theme.FONT_MONO,
+    "Q_BOTH": theme.Q_BOTH, "Q_PLAYER": theme.Q_PLAYER,
+    "Q_FIELD": theme.Q_FIELD, "Q_NEITHER": theme.Q_NEITHER,
+    "SATURN": theme.SATURN,
+    "SERIF": theme.FONT_SERIF, "SANS": theme.FONT_SANS,
+    "DISPLAY": theme.FONT_DISPLAY, "MONO": theme.FONT_MONO,
 }
 
-# No CDN font links: Google Fonts do not resolve offline or inside PDF renderers,
-# which silently dropped the document to a default face on export.
-HEAD = """<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+# Brand typefaces come from Google Fonts for screen, but every stack keeps a
+# local fallback: the PDF is rendered by WeasyPrint inside the container, where
+# no webfont is fetched, and a missing fallback would print Cyrillic as boxes.
+HEAD = ("""<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Джйотиш-Альманах · __NAME__</title>
-<style>%s</style></head><body><div class="wrap">""" % CSS
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="%s" rel="stylesheet">
+<style>%s</style></head><body><div class="wrap">""" % (theme.GOOGLE_FONTS, CSS))
 
 def _dasha_rows(chart):
     rows=""
@@ -156,7 +193,8 @@ def _section5_table(chart, player):
     for h in range(1,13):
         c,name=_q(sav[h],player[h])
         # keyed off the palette so a theme change cannot silently KeyError here
-        cls={theme.GREEN:"",theme.BLUE:"b",theme.YELLOW:"m",theme.RED:"w"}[c]
+        cls={theme.Q_BOTH:"q4",theme.Q_PLAYER:"q3",
+             theme.Q_FIELD:"q2",theme.Q_NEITHER:"q1"}[c]
         rows+=(f"<tr><td>{h} · {houses[h]}</td><td class='mono'>{sav[h]}</td>"
                f"<td class='mono'>{player[h]:.1f}</td><td><span class='tag {cls}'>{name}</span></td></tr>")
     return rows
@@ -295,25 +333,25 @@ def render_synastry(syn, narrative):
       <p class="legend">Луна {na}: {syn['moon_a']['nak_name']} ({syn['moon_a']['sign_ru']}) · Луна {nb}: {syn['moon_b']['nak_name']} ({syn['moon_b']['sign_ru']})</p></section>""")
     # 2 field
     p.append(f"""<section><div class="sec-head"><div class="sec-num">2</div><h2>Сила ПОЛЯ — бинду по домам</h2></div>
-      <div class="cmp-head"><span style="color:#2e567c">◧ {na}</span><span style="color:var(--accent)">{nb} ◧</span></div>
+      <div class="cmp-head"><span style="color:var(--q3)">◧ {na}</span><span style="color:var(--accent)">{nb} ◧</span></div>
       {_cmp_bars(syn['field'],'a','b',na,nb)}</section>""")
     # 3 players
     p.append(f"""<section><div class="sec-head"><div class="sec-num">3</div><h2>Сила ИГРОКОВ — Вимшопака</h2></div>
-      <div class="cmp-head"><span style="color:#2e567c">◧ {na}</span><span style="color:var(--accent)">{nb} ◧</span></div>
+      <div class="cmp-head"><span style="color:var(--q3)">◧ {na}</span><span style="color:var(--accent)">{nb} ◧</span></div>
       {_cmp_bars(syn['players'],'a','b',na,nb)}</section>""")
     # 4 intersynastry
     p.append(f"""<section><div class="sec-head"><div class="sec-num">4</div><h2>Интерсинастрия — наложение карт</h2></div>
       <div class="card"><p style="margin:0 0 6px;color:var(--accent)"><b>Планеты {nb} на домах {na}</b></p>{_overlay_html(syn['overlay_ab'], na, nb)}</div>
-      <div class="card"><p style="margin:0 0 6px;color:#2e567c"><b>Планеты {na} на домах {nb}</b></p>{_overlay_html(syn['overlay_ba'], nb, na)}</div>
+      <div class="card"><p style="margin:0 0 6px;color:var(--q3)"><b>Планеты {na} на домах {nb}</b></p>{_overlay_html(syn['overlay_ba'], nb, na)}</div>
       <p class="prose">{_prose(narrative.get('intersynastry',''))}</p>
       <p class="legend">Даракарака (тема партнёра) — {na}: {syn['dara_a']['pl_ru']} · {nb}: {syn['dara_b']['pl_ru']}</p></section>""")
     # 5 contrasts
     def houses_tags(hs):
         return "".join(f"<span>дом {h}</span>" for h in hs) or "<span style='color:var(--muted)'>—</span>"
     p.append(f"""<section><div class="sec-head"><div class="sec-num">5</div><h2>Контрасты и дополнения</h2></div>
-      <div class="card"><p style="margin:0 0 4px;color:#2f6340"><b>Дополнения</b> (один силён — другой опирается)</p><div class="tagset">{houses_tags(syn['complements'])}</div>
+      <div class="card"><p style="margin:0 0 4px;color:var(--q4)"><b>Дополнения</b> (один силён — другой опирается)</p><div class="tagset">{houses_tags(syn['complements'])}</div>
       <p style="margin:10px 0 4px;color:var(--blue)"><b>Общая сила</b> (оба сильны — синергия/соперничество)</p><div class="tagset">{houses_tags(syn['shared'])}</div>
-      <p style="margin:10px 0 4px;color:#8c3838"><b>Зеркальная уязвимость</b> (оба слабы — беречь вместе)</p><div class="tagset">{houses_tags(syn['mirrors'])}</div></div>
+      <p style="margin:10px 0 4px;color:var(--q1)"><b>Зеркальная уязвимость</b> (оба слабы — беречь вместе)</p><div class="tagset">{houses_tags(syn['mirrors'])}</div></div>
       <p class="prose">{_prose(narrative.get('contrasts',''))}</p></section>""")
     # 6 formula
     note=narrative.get("_note","")
