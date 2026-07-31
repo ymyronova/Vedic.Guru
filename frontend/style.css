@@ -159,6 +159,11 @@ body.wide #result-panel{padding-left:16px;padding-right:16px;}
 .qa-q{font-weight:500;color:var(--ink);margin:0 0 8px;}
 .qa-a{margin:0;color:var(--body);font-size:15.5px;line-height:1.6;white-space:pre-wrap;}
 .qa-a .jy{color:var(--faint);font-size:.86em;font-style:italic;}
+/* Ожидание ответа: пунктир вместо сплошной рамки — карточка ещё не готова. */
+.qa-item.waiting{border-style:dashed;background:transparent;}
+.qa-wait{color:var(--faint);font-style:italic;animation:qapulse 1.6s ease-in-out infinite;}
+@keyframes qapulse{0%,100%{opacity:.45}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.qa-wait{animation:none;opacity:.7}}
 .qa-foot{display:flex;align-items:center;gap:10px;margin-top:10px;
   padding-top:10px;border-top:1px solid var(--line-soft);}
 .qa-include{display:inline-flex;align-items:center;gap:7px;cursor:pointer;

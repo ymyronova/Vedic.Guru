@@ -614,7 +614,7 @@ async function generateWithTime(time){
 // rather than contradicting it. Pairs the user ticks are re-rendered INTO the
 // document server-side, which is why they also reach the PDF and the HTML
 // download instead of living only in the interface.
-let QA = [];            // [{q, a, include}]
+let QA = [];            // [{q, a, include}]; a === null — ответ ещё не пришёл
 
 function qaEscape(s){
   const d = document.createElement("div");
@@ -631,15 +631,21 @@ function renderQA(){
   const list = $("qa-list");
   list.innerHTML = "";
   QA.forEach((item, i) => {
+    const waiting = item.a === null;
     const el = document.createElement("div");
-    el.className = "qa-item";
+    el.className = waiting ? "qa-item waiting" : "qa-item";
+    // Пока ответа нет, вопрос уже виден — иначе полминуты выглядят как
+    // «кнопка не работает». Отметить в отчёт и убрать можно только готовое.
     el.innerHTML =
       `<p class="qa-q">${qaEscape(item.q)}</p>` +
-      `<p class="qa-a">${qaProse(item.a)}</p>` +
-      `<div class="qa-foot">
-         <label class="qa-include"><input type="checkbox" ${item.include ? "checked" : ""}> в отчёт</label>
-         <button class="qa-drop" type="button">убрать</button>
-       </div>`;
+      (waiting
+        ? `<p class="qa-a qa-wait">Читаю вашу карту…</p>`
+        : `<p class="qa-a">${qaProse(item.a)}</p>` +
+          `<div class="qa-foot">
+             <label class="qa-include"><input type="checkbox" ${item.include ? "checked" : ""}> в отчёт</label>
+             <button class="qa-drop" type="button">убрать</button>
+           </div>`);
+    if (waiting){ list.appendChild(el); return; }
     el.querySelector(".qa-include input").addEventListener("change", e => {
       QA[i].include = e.target.checked;
       rebuildReport();
@@ -669,21 +675,41 @@ async function rebuildReport(){
 }
 
 $("qa-send").addEventListener("click", async () => {
+  const btn = $("qa-send");
+  if (btn.disabled) return;               // второй клик не шлёт второй запрос
   $("qa-err").textContent = "";
   const q = $("qa-input").value.trim();
-  if (!q){ $("qa-err").textContent = "Напишите вопрос."; return; }
-  const btn = $("qa-send"), label = btn.textContent;
+  if (!q){ $("qa-err").textContent = "Напишите вопрос."; $("qa-input").focus(); return; }
+
+  const label = btn.textContent;
   btn.disabled = true; btn.textContent = "Думаю…";
+  const item = {q, a: null, include: false};
+  QA.push(item);
+  renderQA();                             // вопрос виден сразу, ответ подставится
+  $("qa-input").value = "";
+  // Ответ идёт около полуминуты, а на бесплатном тарифе ещё дольше, если
+  // сервер в этот момент просыпается. Молчание такой длины читается как
+  // поломка, поэтому через 12 секунд объясняем задержку.
+  const slow = setTimeout(() => {
+    $("qa-err").textContent = "Ответ готовится. Если сервер просыпался после простоя, это займёт до минуты.";
+  }, 12000);
   try{
     const p = birthPayload();
     p.question = q;
-    p.history = QA.map(x => ({q: x.q, a: x.a}));
+    p.history = QA.filter(x => x !== item && x.a !== null).map(x => ({q: x.q, a: x.a}));
     const res = await api("/api/ask", p);
-    QA.push({q, a: res.answer, include: false});
-    $("qa-input").value = "";
+    item.a = res.answer;
+    $("qa-err").textContent = "";
     renderQA();
-  }catch(e){ $("qa-err").textContent = e.message; }
-  finally{ btn.disabled = false; btn.textContent = label; }
+  }catch(e){
+    // Вопрос без ответа висел бы вечно; текст возвращаем в поле, чтобы
+    // повторить попытку не пришлось набирать заново.
+    QA = QA.filter(x => x !== item);
+    renderQA();
+    if (!$("qa-input").value) $("qa-input").value = q;
+    $("qa-err").textContent = e.message;
+  }
+  finally{ clearTimeout(slow); btn.disabled = false; btn.textContent = label; }
 });
 
 // Ctrl/Cmd+Enter sends, so a multi-line question is still easy to submit.

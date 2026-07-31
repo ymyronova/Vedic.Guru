@@ -452,8 +452,25 @@ def verify_status():
     return {"threshold": verify.THRESHOLD, "engine": engine}
 
 # ---- static frontend ----
+# Без Cache-Control браузер вправе решать сам, насколько долго держать файл.
+# index.html и app.js при этом истекают в разное время, и возможно худшее
+# сочетание: свежая разметка со старым скриптом. Разметка тогда показывает
+# кнопку, которой в старом скрипте не соответствует ни один обработчик, —
+# нажатие молча не делает ничего, и это не отличить от поломки. no-cache не
+# запрещает кэш, а требует каждый раз переспросить сервер: при совпадении ETag
+# ответ 304 без тела, так что цена — один запрос, а разметка и скрипт всегда
+# из одной сборки.
+_REVALIDATE = "no-cache"
+
+class _FreshStatic(StaticFiles):
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers.setdefault("Cache-Control", _REVALIDATE)
+        return resp
+
 @app.api_route("/", methods=["GET", "HEAD"])
 def index():
-    return FileResponse(FRONTEND / "index.html")
+    return FileResponse(FRONTEND / "index.html",
+                        headers={"Cache-Control": _REVALIDATE})
 
-app.mount("/", StaticFiles(directory=str(FRONTEND)), name="static")
+app.mount("/", _FreshStatic(directory=str(FRONTEND)), name="static")
