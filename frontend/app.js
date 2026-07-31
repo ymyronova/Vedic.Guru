@@ -369,11 +369,29 @@ function restoreProfile(){
   return true;
 }
 
+const timeUnknown = () => $("no-time").checked;
+
 function applyReturningVisitor(){
   const returning = seenLagnaStep();
-  $("go").textContent = returning ? "Собрать альманах →" : "Рассчитать лагну →";
-  $("go-lagna").classList.toggle("hidden", !returning);
+  // Ticking "не знаю" outranks everything: with no time there is nothing to
+  // confirm, so the button leads to reconstruction rather than to a chart.
+  $("go").textContent = timeUnknown() ? "Подобрать время по событиям →"
+                      : returning     ? "Собрать альманах →"
+                                      : "Рассчитать лагну →";
+  $("go-lagna").classList.toggle("hidden", !returning || timeUnknown());
 }
+
+// Ticking the box empties and disables the time field, so a stale 12:00 cannot
+// be mistaken for a real value — by the user or by the payload.
+$("no-time").addEventListener("change", () => {
+  const off = timeUnknown();
+  $("time").disabled = off;
+  $("time").value = off ? "" : "12:00";
+  const un = $("unknown-time");           // mirror it on the events panel
+  if (un) un.checked = off;
+  applyReturningVisitor();
+});
+
 applyReturningVisitor();
 
 if (restoreProfile()) $("forget-profile").classList.remove("hidden");
@@ -395,6 +413,9 @@ $("forget-profile").addEventListener("click", () => {
 
 function validBirth(p){
   if (!p.date){ $("err").textContent = "Укажите дату рождения."; return false; }
+  // With "не знаю" ticked the time field is empty by design, so it is not
+  // required — the events flow reconstructs it.
+  if (!timeUnknown() && !p.time){ $("err").textContent = "Укажите время или отметьте «не знаю»."; return false; }
   if (!p.place && !(Number.isFinite(p.lat) && Number.isFinite(p.lon))){
     $("err").textContent = "Укажите место рождения или координаты."; return false; }
   return true;
@@ -432,8 +453,9 @@ $("go").addEventListener("click", async () => {
   $("err").textContent = "";
   const p = birthPayload();
   if (!validBirth(p)) return;
-  if (seenLagnaStep()) await buildAlmanac(p);   // skip the confirmation
-  else await goToLagna(p);
+  if (timeUnknown())        await goToRectification();
+  else if (seenLagnaStep()) await buildAlmanac(p);   // skip the confirmation
+  else                      await goToLagna(p);
 });
 
 // Explicit way back to the lagna step, and thus to event rectification.
@@ -444,25 +466,18 @@ $("go-lagna").addEventListener("click", async () => {
   await goToLagna(p);
 });
 
-// "Не знаю время рождения" — straight to event rectification. Without a time the
-// lagna is undetermined, so confirming one would be theatre: the 12:00 default
-// is a placeholder, not a guess worth showing. Skips the lagna panel entirely.
-$("no-time").addEventListener("click", async () => {
-  $("err").textContent = "";
-  const p = birthPayload();
-  if (!p.date){ $("err").textContent = "Укажите дату рождения."; return; }
-  if (!p.place && !(Number.isFinite(p.lat) && Number.isFinite(p.lon))){
-    $("err").textContent = "Укажите место рождения или координаты."; return; }
+// Without a time the lagna is undetermined, so confirming one would be theatre.
+// Go straight to reconstruction from life events, scanning the whole day.
+async function goToRectification(){
   await loadCatalog();
   const list = $("events-list");
   if (!list.children.length){
     list.appendChild(eventRow()); list.appendChild(eventRow()); list.appendChild(eventRow());
   }
-  // Tell the engine to scan the whole day rather than a window around a time.
   const un = $("unknown-time");
   if (un) un.checked = true;
   navGo("events-panel", null);
-});
+}
 
 // ---- Step 2: full almanac ----
 $("confirm-yes").addEventListener("click", async () => {
@@ -555,8 +570,14 @@ function renderRanked(r){
 }
 
 async function generateWithTime(time){
+  // A time is now known, so the field comes back to life and both "не знаю"
+  // boxes clear — otherwise the reconstructed time would sit in a greyed-out
+  // input and the next run would still scan the whole day.
+  $("no-time").checked = false;
+  $("time").disabled = false;
   $("time").value = time;
   const un = $("unknown-time"); if (un) un.checked = false;
+  applyReturningVisitor();
   await buildAlmanac(birthPayload());
 }
 
