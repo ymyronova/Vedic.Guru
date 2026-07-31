@@ -2,8 +2,13 @@
 """Assemble the computed chart + SVGs + narrative into the full styled almanac HTML."""
 import html as _h
 import re
+from datetime import timedelta
+
 import theme
-from charts import natal_svg, vimshopaka_svg, sav_svg, bubble_svg, dignity_grid_html, _q
+from charts import (natal_svg, vimshopaka_svg, sav_svg, bubble_svg, _q,
+                    muntha_wheel_svg, monthly_axes_svg, dasha_gantt_svg,
+                    stacked_bala_svg, saham_grid_svg, year_compare_svg,
+                    months_overlay_svg)
 from jyotish import PL_RU
 
 # Tone-of-voice rule: every claim is written in plain language, followed by the
@@ -136,6 +141,51 @@ tr{break-inside:avoid;page-break-inside:avoid;}
 thead{display:table-header-group;}
 .sec-head,h2,h3{break-after:avoid;page-break-after:avoid;}
 .foot{break-before:page;page-break-before:always;}
+
+/* ---- годовой слой (Варшапхала) ---- */
+.part-head{margin:0 0 18px;padding:16px 0 12px;border-top:2px solid var(--accent);
+  border-bottom:1px solid var(--line);}
+.part-kicker{font-family:%(MONO)s;font-size:11px;letter-spacing:2.5px;
+  text-transform:uppercase;color:var(--accent);margin:0 0 4px;}
+.part-head h2{margin:0;font-size:30px;}
+.part-head .sub{color:var(--muted);font-size:13.5px;margin-top:5px;}
+
+/* Ключевые факты: рамка перед основным текстом части, одна строка —
+   одно утверждение, чтобы блок читался без прокрутки. */
+.facts{border:1px solid var(--accent);border-radius:6px;background:var(--wash);
+  padding:14px 18px;margin:0 0 22px;}
+.facts dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;}
+.facts dt{font-family:%(MONO)s;font-size:11px;letter-spacing:.6px;
+  text-transform:uppercase;color:var(--accent2);white-space:nowrap;padding-top:2px;}
+.facts dd{margin:0;color:var(--ink);font-size:14px;line-height:1.45;}
+
+/* «Влияние на жизнь» — три-четыре строки после КАЖДОГО раздела: перевод
+   технического содержания в практическое следствие, а не пересказ таблицы. */
+.impact{border-left:3px solid var(--accent);background:var(--panel2);
+  padding:11px 15px;margin:14px 0 0;border-radius:0 4px 4px 0;}
+.impact .lbl{font-family:%(MONO)s;font-size:10px;letter-spacing:1.6px;
+  text-transform:uppercase;color:var(--accent2);display:block;margin-bottom:4px;}
+.impact p{margin:0;font-size:14px;line-height:1.55;color:var(--body);}
+
+/* One-pager: год на одном экране, читаемый в отрыве от документа. */
+.onepager{border:1px solid var(--line);border-radius:6px;padding:18px 20px;
+  background:var(--panel);}
+.onepager h3{margin:0 0 12px;font-size:20px;color:var(--accent2);}
+.op-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.op-col h4{margin:0 0 6px;font-size:13px;font-family:%(MONO)s;letter-spacing:1px;
+  text-transform:uppercase;color:var(--faint);font-weight:500;}
+.op-col ul{margin:0;padding-left:17px;}
+.op-col li{font-size:13.5px;line-height:1.5;color:var(--body);margin-bottom:4px;}
+.op-formula{margin-top:16px;padding-top:12px;border-top:1px solid var(--line-soft);
+  font-family:%(DISPLAY)s;font-size:17px;line-height:1.4;color:var(--ink);}
+@media(max-width:640px){.op-grid{grid-template-columns:1fr}}
+
+.mtable td.num{font-family:%(MONO)s;text-align:right;white-space:nowrap;}
+.bar-cell{display:inline-block;height:8px;border-radius:2px;background:var(--q3);
+  vertical-align:middle;}
+.sign-pos{color:var(--q4);} .sign-neg{color:var(--q1);}
+.yoga-row td:first-child{width:34%%;}
+.unverified{color:var(--faint);font-size:11px;font-family:%(MONO)s;}
 """ % {
     "PAPER": theme.PAPER, "PANEL": theme.PANEL, "PANEL2": theme.PANEL2,
     "ACCENT": theme.ACCENT, "ACCENT2": theme.ACCENT2,
@@ -225,6 +275,412 @@ def _qa_section(qa, num):
       на тот же расчёт.</p>{items}</section>""")
 
 
+# ============================================================================
+# Годовой слой: части по годам + сквозное сравнение
+# ============================================================================
+ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+NATAL_SECTIONS = 4
+
+
+def _next_num(chart):
+    """Номер следующего раздела после всех годовых частей и сравнения."""
+    n = NATAL_SECTIONS
+    parts = chart.get("varsha") or []
+    if parts:
+        n += 1                      # блок сравнения идёт одним разделом
+    return n + 1
+
+
+def _impact(text, fallback):
+    """Блок «Влияние на жизнь» — после каждого раздела без исключений.
+
+    Пустым он быть не может: если модель не дала текста, следствие собирается
+    из самих данных. Раздел без ответа на «и что мне с этим делать» — это
+    таблица, оставленная читателю на самостоятельный разбор.
+    """
+    body = (text or "").strip() or fallback
+    return (f'<div class="impact"><span class="lbl">Влияние на жизнь</span>'
+            f'<p>{_prose(body)}</p></div>')
+
+
+def _facts_box(part):
+    """Ключевые факты года: одна строка — одно утверждение, один экран."""
+    esc = _h.escape
+    v = part["varshesha"]["winner"]
+    mun = part["muntha"]
+    best = sorted(part["months"], key=lambda m: -m["valence"])[:2]
+    worst = min(part["months"], key=lambda m: m["valence"])
+    strongest = max(part["pancha"].items(), key=lambda kv: kv[1]["total"])
+    rare = [y["name"] for y in part["tajika"]["yogas"]
+            if y["present"] and y["verdict"] == "хорошо"][:3]
+    risk = [y["name"] for y in part["tajika"]["yogas"]
+            if y["present"] and y["verdict"] == "трудно"][:3]
+    stell = _stelliums(part)
+
+    rows = [
+        ("Варша-Лагна", f'{part["lagna_sign_ru"]} {part["lagna_dms"]} · '
+                        f'упр. {PL_RU[part["lagna_lord"]]}'),
+        ("Варшеша", f'{v["planet_ru"]} ({v["bala"]:.1f} из 20) — {v["role"]}'),
+        ("Мунтха", f'{mun["sign_ru"]} — {mun["house"]}-й дом'),
+        ("Стеллиум", stell or "нет скоплений — планеты разведены по домам"),
+        ("Сильнейшая", f'{PL_RU[strongest[0]]} {strongest[1]["total"]:.1f} из 20'),
+        ("Опорные связи", ", ".join(rare) if rare else "выраженных нет"),
+        ("Что беречь", ", ".join(risk) if risk else "тяжёлых связей нет"),
+        ("Лучшие месяцы", ", ".join(m["label"] for m in best)),
+        ("Трудный месяц", worst["label"]),
+    ]
+    dl = "".join(f"<dt>{esc(k)}</dt><dd>{esc(val)}</dd>" for k, val in rows)
+    return f'<div class="facts"><dl>{dl}</dl></div>'
+
+
+def _stelliums(part):
+    by_house = {}
+    for p in part["planets"]:
+        if p["code"] in ("Ra", "Ke"):
+            continue
+        by_house.setdefault(p["house"], []).append(p["name"])
+    out = [f'{", ".join(v)} — все в {h}-м доме'
+           for h, v in sorted(by_house.items()) if len(v) >= 3]
+    return "; ".join(out)
+
+
+def _year_chart_table(part):
+    rows = ""
+    for p in part["planets"]:
+        rules = ", ".join(f"{h}-й" for h in p["rules"]) or "—"
+        rows += (f'<tr><td>{_h.escape(p["name"])}</td>'
+                 f'<td class="mono">{_h.escape(p["pos"])}</td>'
+                 f'<td class="mono">{p["house"]}</td>'
+                 f'<td class="mono">{rules}</td>'
+                 f'<td>{_h.escape(p["dignity_ru"])}</td></tr>')
+    return (f'<div class="tablewrap"><table><thead><tr><th>Планета</th>'
+            f'<th class="mono">Долгота</th><th class="mono">Дом</th>'
+            f'<th class="mono">Управляет</th><th>Положение</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>')
+
+
+def _tajika_table(part):
+    """16 Таджака-йог. Термин уходит в скобки, смысл стоит первым."""
+    rows = ""
+    for y in part["tajika"]["yogas"]:
+        mark = "есть" if y["present"] else "нет"
+        cls = "" if y["present"] else ' style="opacity:.5"'
+        # Смысл первым, термин следом в скобках — конвенция .jy. Сырое название
+        # в заголовке или колонке её нарушает, поэтому имени отдельной колонки нет.
+        claim = "{} ({})".format(y["meaning"], y["name"])
+        rows += (f'<tr class="yoga-row"{cls}>'
+                 f'<td>{_prose(claim)}</td>'
+                 f'<td class="mono">{mark}</td>'
+                 f'<td>{_h.escape(y["condition"])}</td>'
+                 f'<td>{_h.escape(y["evidence"])}</td></tr>')
+    return (f'<div class="tablewrap"><table><thead><tr><th>Что это значит</th>'
+            f'<th class="mono">В карте</th><th>Техническое условие</th>'
+            f'<th>Основание</th></tr></thead><tbody>{rows}</tbody></table></div>')
+
+
+def _saham_table(part):
+    """36 сахамов по месяцам активации."""
+    rows = ""
+    for m in part["months"]:
+        for s in m["saham_records"]:
+            risky = any(w in s["meaning"] for w in ("риск", "беречь", "осторожность"))
+            status = "беречь" if risky else "поддержан"
+            flag = ('<span class="unverified"> формула не подтверждена</span>'
+                    if not s.get("verified", True) else "")
+            rows += (f'<tr><td class="mono">{_h.escape(m["label"])}</td>'
+                     f'<td>{_h.escape(s["name"])}{flag}</td>'
+                     f'<td class="mono">{_h.escape(s["pos"])}</td>'
+                     f'<td class="mono">{s["house"]}</td>'
+                     f'<td>{_h.escape(s["meaning"])}</td>'
+                     f'<td>{status}</td></tr>')
+    return (f'<div class="tablewrap"><table><thead><tr><th class="mono">Мес.</th>'
+            f'<th>Тема</th><th class="mono">Положение</th><th class="mono">Дом</th>'
+            f'<th>Что это в жизни</th><th>Статус</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>')
+
+
+def _month_table(part):
+    """Двенадцать строк — по одной на месяц года."""
+    rows = ""
+    for m in part["months"]:
+        occ = ", ".join(m["occupants_ru"]) or "пусто"
+        sign_cls = "sign-pos" if m["valence"] >= 0 else "sign-neg"
+        bar = int(max(m["salience"], 0) * 7)
+        todo = ("укреплять и вкладываться" if m["valence"] >= 1.5
+                else "держать ровный ход" if m["valence"] >= 0
+                else "не начинать нового, беречь" if m["valence"] >= -1.5
+                else "переждать, закрывать хвосты")
+        rows += (f'<tr><td class="mono">{_h.escape(m["label"])}</td>'
+                 f'<td class="mono">{_h.escape(m["sign_ru"])} · {m["house"]}-й</td>'
+                 f'<td>{_h.escape(occ)}</td>'
+                 f'<td class="num"><span class="bar-cell" style="width:{bar}px"></span> '
+                 f'{m["salience"]:.1f}</td>'
+                 f'<td class="num {sign_cls}">{m["valence"]:+.1f}</td>'
+                 f'<td>{_h.escape(", ".join(m["sahams"][:3]) or "—")}</td>'
+                 f'<td>{todo}</td></tr>')
+    return (f'<div class="tablewrap"><table class="mtable"><thead><tr>'
+            f'<th class="mono">Месяц</th><th class="mono">Знак · дом</th>'
+            f'<th>Планеты</th><th class="mono">Громкость денег</th>'
+            f'<th class="mono">Знак исхода</th><th>Темы месяца</th>'
+            f'<th>Что делать</th></tr></thead><tbody>{rows}</tbody></table></div>')
+
+
+def _dasha_tables(part):
+    out = ""
+    for name, segs in part["dashas"].items():
+        rows = "".join(
+            f'<tr><td>{_h.escape(str(s["lord"]))}</td>'
+            f'<td class="mono">{s["start"]:%d.%m.%Y}</td>'
+            f'<td class="mono">{s["end"]:%d.%m.%Y}</td>'
+            f'<td class="num">{s["days"]:.0f}</td></tr>' for s in segs)
+        out += (f'<h3 style="font-size:16px;margin:14px 0 6px;color:var(--accent2)">'
+                f'{_h.escape(name)}</h3>'
+                f'<div class="tablewrap"><table><thead><tr><th>Управитель</th>'
+                f'<th class="mono">С</th><th class="mono">По</th>'
+                f'<th class="num">Дней</th></tr></thead><tbody>{rows}</tbody>'
+                f'</table></div>')
+    return out
+
+
+def _onepager(part, ny):
+    """Год на одном экране — раздел, который читается в отрыве от документа."""
+    esc = _h.escape
+    v = part["varshesha"]["winner"]
+    mun = part["muntha"]
+    months = part["months"]
+    best = sorted(months, key=lambda m: -m["valence"])[:3]
+    worst = sorted(months, key=lambda m: m["valence"])[:3]
+    loud = max(months, key=lambda m: m["salience"])
+
+    focus = ny.get("focus") or [
+        f'Тема года заявлена {mun["house"]}-м домом — {mun["sign_ru"]}',
+        f'Опора года — {v["planet_ru"]}, сила {v["bala"]:.1f} из 20',
+        f'Денежная тема громче всего звучит в {loud["label"]}',
+    ]
+    care = ny.get("care") or [
+        f'{worst[0]["label"]} — знак исхода {worst[0]["valence"]:+.1f}',
+        f'{worst[1]["label"]} — знак исхода {worst[1]["valence"]:+.1f}',
+        "Громкая тема при отрицательном знаке — не повод действовать быстрее",
+    ]
+    frame = [
+        ("Варша-Лагна", f'{part["lagna_sign_ru"]} {part["lagna_dms"]}'),
+        ("Управитель года", f'{v["planet_ru"]} · {v["bala"]:.1f}/20'),
+        ("Мунтха", f'{mun["sign_ru"]} · {mun["house"]}-й дом'),
+        ("Вход в год", f'{part["pravesh"]["local"]:%d.%m.%Y %H:%M}'),
+        ("Лучшие месяцы", ", ".join(m["label"] for m in best)),
+        ("Трудные месяцы", ", ".join(m["label"] for m in worst)),
+    ]
+    frame_rows = "".join(
+        f'<tr><td>{esc(k)}</td><td class="mono">{esc(val)}</td></tr>'
+        for k, val in frame)
+    arc = " · ".join(f'{m["label"]} {m["valence"]:+.1f}' for m in months)
+    formula = ny.get("formula") or (
+        f'Год держится на {v["planet_ru"]} и говорит о теме {mun["house"]}-го дома.')
+
+    spheres = ny.get("spheres") or []
+    sph_html = ""
+    if spheres:
+        sph_html = ("<h4>Сферы жизни</h4><ul>" + "".join(
+            f'<li>{_prose(str(s))}</li>' for s in spheres) + "</ul>")
+
+    return f"""<div class="onepager">
+      <h3>Год на одном экране</h3>
+      <div class="tablewrap"><table><tbody>{frame_rows}</tbody></table></div>
+      <div class="op-grid" style="margin-top:14px">
+        <div class="op-col"><h4>Три фокуса</h4><ul>
+          {"".join(f"<li>{_prose(str(x))}</li>" for x in focus[:3])}</ul>{sph_html}</div>
+        <div class="op-col"><h4>Три зоны осторожности</h4><ul>
+          {"".join(f"<li>{_prose(str(x))}</li>" for x in care[:3])}</ul></div>
+      </div>
+      <p class="legend" style="margin-top:12px">Дуга года по месяцам (знак исхода): {esc(arc)}</p>
+      <div class="op-formula">{_prose(formula)}</div>
+    </div>"""
+
+
+def _annual_parts(chart, narrative):
+    """Годовые части: по одиннадцать разделов на каждую."""
+    parts = chart.get("varsha") or []
+    if not parts:
+        return ""
+    years_text = narrative.get("years") or []
+    out = []
+    for i, part in enumerate(parts):
+        ny = years_text[i] if i < len(years_text) else {}
+        imp = ny.get("impacts") or {}
+        mun = part["muntha"]
+        v = part["varshesha"]["winner"]
+        pv_rows = [(PL_RU[p], part["pancha"][p]["parts"]) for p in part["pancha"]]
+        hb_rows = [(PL_RU[p], part["harsha"][p]["parts"]) for p in part["harsha"]]
+        loud = max(part["months"], key=lambda m: m["salience"])
+        worst = min(part["months"], key=lambda m: m["valence"])
+
+        body = [f"""<div class="part-head">
+          <p class="part-kicker">Часть {ROMAN[i] if i < len(ROMAN) else i + 1} · год {_h.escape(part["label"])}</p>
+          <h2>{_h.escape(part["label"])} — возраст {part["age"]}</h2>
+          <div class="sub">Вход в год: {part["pravesh"]["local"]:%d.%m.%Y %H:%M} ·
+            {_h.escape(part.get("place") or "")} · карта
+            {"дневная" if part["is_day"] else "ночная"}</div></div>"""]
+
+        body.append(_facts_box(part))
+        if ny.get("thread"):
+            body.append(f'<div class="thread"><p class="prose lead" style="margin:0">'
+                        f'{_prose(ny["thread"])}</p></div>')
+
+        body.append("<h3>Годовая карта</h3>" + _year_chart_table(part))
+        body.append(_impact(imp.get("chart"),
+                            f'Год разложен по домам так: тяжесть смещена туда, где стоят '
+                            f'планеты, и именно эти области будут требовать внимания.'))
+
+        body.append("<h3>Тема года</h3>"
+                    f'<p class="prose">Тематический дом года — {mun["house"]}-й '
+                    f'({_h.escape(mun["sign_ru"])}): точка, которая продвигается на один '
+                    f'знак за прожитый год (Мунтха). Её управитель — '
+                    f'{_h.escape(mun["lord_ru"])}.</p>'
+                    f'<div class="card">{muntha_wheel_svg(part["months"], mun["sign"], part["lagna_sign"])}</div>')
+        body.append(_impact(imp.get("muntha"),
+                            f'Что бы ни происходило в этом году, оно будет собираться вокруг '
+                            f'темы {mun["house"]}-го дома — туда стоит вкладывать, а не спорить с этим.'))
+
+        cand = "".join(
+            f'<tr><td>{_h.escape(c["role"])}</td><td>{_h.escape(c["planet_ru"])}</td>'
+            f'<td class="num">{c["bala"]:.1f}</td></tr>'
+            for c in part["varshesha"]["candidates"])
+        body.append(f"""<h3>Управитель года и силы</h3>
+          <p class="prose">Управителем года становится сильнейший из пяти претендентов —
+          {_h.escape(v["planet_ru"])}, {v["bala"]:.1f} из 20 (Варшеша).</p>
+          <div class="tablewrap"><table><thead><tr><th>Претендент</th><th>Планета</th>
+          <th class="num">Сила</th></tr></thead><tbody>{cand}</tbody></table></div>
+          <div class="card">{stacked_bala_svg(pv_rows, 20, "")}
+            <p class="legend" style="text-align:center">Из чего собрана сила планеты (Панча-Варгия, из 20)</p></div>
+          <div class="card">{stacked_bala_svg(hb_rows, 25, "")}
+            <p class="legend" style="text-align:center">Достоинства по пяти условиям (Харша-бала)</p></div>""")
+        body.append(_impact(imp.get("varshesha"),
+                            f'{v["planet_ru"]} задаёт тон году: к чему эта планета '
+                            f'расположена, то в этом году идёт легче.'))
+
+        body.append("<h3>Связи года</h3>" + _tajika_table(part))
+        body.append(_impact(imp.get("tajika"),
+                            'Связи на подходе — то, что ещё созревает и требует участия; '
+                            'распавшиеся — то, что уйдёт само, даже если тратить силы.'))
+
+        body.append(f"""<h3>Пять годовых шкал</h3>
+          <p class="prose">Пять систем делят один и тот же год по-разному, и совпадение
+          тяжёлого управителя сразу в нескольких — более веское, чем в одной.</p>
+          <div class="card">{dasha_gantt_svg(part["dashas"], part["pravesh"]["local"],
+                                             part["pravesh"]["local"] + _td(part["length_days"]))}</div>
+          {_dasha_tables(part)}""")
+        body.append(_impact(imp.get("dashas"),
+                            'Смотреть стоит туда, где несколько шкал сходятся на одном '
+                            'управителе: там год меняет характер заметнее всего.'))
+
+        body.append("<h3>Темы года по месяцам</h3>" + _saham_table(part) +
+                    f'<div class="card">{saham_grid_svg(part["months"])}'
+                    f'<p class="legend" style="text-align:center">Когда какая тема включается '
+                    f'(чувствительные точки года — сахамы)</p></div>')
+        body.append(_impact(imp.get("sahams"),
+                            'Тема включается в свой месяц — это подсказка, когда именно '
+                            'заниматься вопросом, а не заниматься им весь год подряд.'))
+
+        body.append("<h3>Помесячная таблица</h3>" + _month_table(part))
+        body.append(_impact(imp.get("months"),
+                            f'Громче всего денежная тема звучит в {loud["label"]}, '
+                            f'а труднее всего складывается {worst["label"]}.'))
+
+        body.append(f"""<h3>Две оси года</h3>
+          <p class="prose">Это две разные величины, а не одна: столбцы — насколько громко
+          звучит денежная тема, ломаная — знак исхода. Громко и в минусе — не то же самое,
+          что тихо.</p>
+          <div class="card">{monthly_axes_svg(part["months"])}</div>""")
+        body.append(_impact(imp.get("axes"),
+                            'Месяц с громкой темой и отрицательным знаком — не сигнал '
+                            'ускоряться, а сигнал не подписывать нового.'))
+
+        body.append(_onepager(part, ny))
+        body.append(_impact(imp.get("onepager"),
+                            'Если из года запомнить одно — пусть это будет формула выше.'))
+
+        out.append(f'<section>{"".join(body)}</section>')
+    return "".join(out)
+
+
+def _td(days):
+    return timedelta(days=days)
+
+
+def _compare_block(chart, narrative):
+    """Сквозное сравнение: тренд, которого не видно ни в одной отдельной части."""
+    parts = chart.get("varsha") or []
+    if len(parts) < 2:
+        return ""
+    nc = (narrative.get("compare") or {})
+    labels = [p["label"] for p in parts]
+
+    rows = "".join(
+        f'<tr><td>{_h.escape(k)}</td>' +
+        "".join(f'<td class="num">{_h.escape(str(val))}</td>' for val in vals) +
+        "</tr>"
+        for k, vals in _compare_rows(parts).items())
+    head = "".join(f'<th class="mono">{_h.escape(l)}</th>' for l in labels)
+
+    series = {
+        "Сила управителя года": [round(p["varshesha"]["winner"]["bala"], 1) for p in parts],
+        "Опорных связей": [sum(1 for y in p["tajika"]["yogas"]
+                               if y["present"] and y["verdict"] == "хорошо") for p in parts],
+        "Тяжёлых связей": [sum(1 for y in p["tajika"]["yogas"]
+                               if y["present"] and y["verdict"] == "трудно") for p in parts],
+        "Средняя громкость денег": [round(sum(m["salience"] for m in p["months"]) / 12, 1)
+                                    for p in parts],
+    }
+    money = {
+        "Сумма знака исхода": [round(sum(m["valence"] for m in p["months"]), 1) for p in parts],
+        "Пик громкости": [round(max(m["salience"] for m in p["months"]), 1) for p in parts],
+    }
+    overlay = [(p["label"], [m["valence"] for m in p["months"]]) for p in parts]
+
+    return f"""<section>
+      <div class="sec-head"><div class="sec-num">{NATAL_SECTIONS + 1}</div>
+        <h2>Сравнение лет</h2></div>
+      <p class="prose">Каждая часть выше самодостаточна, и именно поэтому тренд между
+      годами в них не виден. Здесь годы стоят рядом на одной шкале.</p>
+      <div class="tablewrap"><table><thead><tr><th>Параметр</th>{head}</tr></thead>
+        <tbody>{rows}</tbody></table></div>
+      {_impact(nc.get("params"), "Сравнивать стоит не абсолютные числа, а направление: "
+                                 "что растёт от года к году, а что убывает.")}
+      <h3>Параметры по годам</h3>
+      <div class="card">{year_compare_svg(series, labels, "")}</div>
+      {_impact(nc.get("trend"), "Год с сильным управителем и малым числом тяжёлых связей "
+                                "проще для крупных решений, чем год с обратным набором.")}
+      <h3>Финансовый разрез</h3>
+      <div class="card">{year_compare_svg(money, labels, "")}</div>
+      {_impact(nc.get("money"), "Громкость и знак исхода снова разведены: год может быть "
+                                "шумным по деньгам и при этом убыточным по знаку.")}
+      <h3>Единая шкала месяцев</h3>
+      <div class="card">{months_overlay_svg(overlay)}</div>
+      {_impact(nc.get("months"), "Наложение показывает, повторяется ли трудный месяц из года "
+                                 "в год или это разовое совпадение.")}
+    </section>"""
+
+
+def _compare_rows(parts):
+    out = {}
+    out["Варша-Лагна"] = [p["lagna_sign_ru"] for p in parts]
+    out["Управитель года"] = [p["varshesha"]["winner"]["planet_ru"] for p in parts]
+    out["Сила управителя"] = [f'{p["varshesha"]["winner"]["bala"]:.1f}' for p in parts]
+    out["Мунтха · дом"] = [f'{p["muntha"]["sign_ru"]} · {p["muntha"]["house"]}-й'
+                           for p in parts]
+    out["Лучший месяц"] = [max(p["months"], key=lambda m: m["valence"])["label"]
+                           for p in parts]
+    out["Трудный месяц"] = [min(p["months"], key=lambda m: m["valence"])["label"]
+                            for p in parts]
+    out["Опорных связей"] = [sum(1 for y in p["tajika"]["yogas"]
+                                 if y["present"] and y["verdict"] == "хорошо")
+                             for p in parts]
+    out["Тяжёлых связей"] = [sum(1 for y in p["tajika"]["yogas"]
+                                 if y["present"] and y["verdict"] == "трудно")
+                             for p in parts]
+    return out
+
+
 def render_almanac(name, birth_meta, chart, narrative, focus=None, qa=None):
     esc=_h.escape
     bubble, player = bubble_svg(chart)
@@ -241,37 +697,33 @@ def render_almanac(name, birth_meta, chart, narrative, focus=None, qa=None):
     # 1 portrait
     parts.append(f"""<section><div class="sec-head"><div class="sec-num">1</div><h2>Портрет одной нитью</h2></div>
       <div class="thread"><p class="prose lead" style="margin:0">{_prose(narrative.get('portrait',''))}</p></div></section>""")
-    # 2 shodashavarga
-    parts.append(f"""<section><div class="sec-head"><div class="sec-num">2</div><h2>Сила дробных карт</h2></div>
-      <h3 style="color:var(--accent);font-size:21px;margin:6px 0 4px">Сетка достоинств по 16 варгам</h3>
-      <div class="tablewrap">{dignity_grid_html(chart)}</div>
-      <p class="legend"><b>Э</b> экзальтация · <b>С</b> свой · <b>д</b> друг · <b>н</b> нейтрал · <b>в</b> враг · <b>П</b> падение</p>
-      <div class="card">{vimshopaka_svg(chart)}<p class="legend" style="text-align:center">Вимшопака-балл (из 20)</p></div>
-      <div class="card">{sav_svg(chart)}<p class="legend" style="text-align:center">Бинду по домам · ось X — номер дома</p></div>
-      <p class="prose">{_prose(narrative.get('shodashavarga',''))}</p></section>""")
-    # 3 yogas
-    parts.append(f"""<section><div class="sec-head"><div class="sec-num">3</div><h2>Ключевые йоги</h2></div>
+    # 2 yogas
+    parts.append(f"""<section><div class="sec-head"><div class="sec-num">2</div><h2>Ключевые йоги</h2></div>
       <p class="prose">{_prose(narrative.get('yogas',''))}</p>{_yoga_cards(chart)}</section>""")
-    # 4 dasha
+    # 3 dasha
     ad=next((x for x in chart["antardashas"] if x["current"]),None)
     ad_line=(f"Сейчас: <b>{chart['current_dasha']['lord_ru']} · {ad['lord_ru']}</b> "
              f"(до {ad['end'].year}.{ad['end'].month:02d})." if ad else "")
-    parts.append(f"""<section><div class="sec-head"><div class="sec-num">4</div><h2>Вимшоттари — дуга жизни</h2></div>
+    parts.append(f"""<section><div class="sec-head"><div class="sec-num">3</div><h2>Вимшоттари — дуга жизни</h2></div>
       <div class="tablewrap"><table><thead><tr><th>Махадаша</th><th class="mono">Годы</th><th class="mono">Возраст</th></tr></thead>
       <tbody>{_dasha_rows(chart)}</tbody></table></div>
       <div class="callout">{ad_line}</div>
       <p class="prose">{_prose(narrative.get('dasha',''))}</p></section>""")
-    # 5 integral
-    parts.append(f"""<section><div class="sec-head"><div class="sec-num">5</div><h2>Интегральная карта судьбы</h2></div>
+    # 4 integral — сюда же переехал итоговый Вимшопака-балл: он и есть ось
+    # «игрок» на этой диаграмме, а развёрнутая сетка достоинств по 16 варгам
+    # убрана как отдельная таблица.
+    parts.append(f"""<section><div class="sec-head"><div class="sec-num">4</div><h2>Интегральная карта судьбы</h2></div>
       <p>Каждый дом — это <b>поле</b> (бинду) и <b>игрок</b> (Вимшопака держателя). Ось X — сила поля, ось Y — сила игрока.</p>
       <div class="card" style="padding:14px">{bubble}</div>
       <div class="tablewrap"><table><thead><tr><th>Дом · сфера</th><th class="mono">Поле</th><th class="mono">Игрок</th><th>Тип</th></tr></thead>
       <tbody>{_section5_table(chart,player)}</tbody></table></div>
+      <div class="card">{vimshopaka_svg(chart)}<p class="legend" style="text-align:center">Вимшопака-балл (из 20) — сила игрока</p></div>
+      <div class="card">{sav_svg(chart)}<p class="legend" style="text-align:center">Бинду по домам — сила поля · ось X: номер дома</p></div>
+      <p class="prose">{_prose(narrative.get('shodashavarga',''))}</p>
       <div class="card"><p class="prose" style="margin:0">{_prose(narrative.get('integral',''))}</p></div></section>""")
-    # 6 planets
-    parts.append(f"""<section><div class="sec-head"><div class="sec-num">6</div><h2>Как держать каждую планету в высшем состоянии</h2></div>
-      <p class="prose">{_prose(narrative.get('planets',''))}</p></section>""")
-    parts.append(_qa_section(qa, 7))
+    parts.append(_annual_parts(chart, narrative))
+    parts.append(_compare_block(chart, narrative))
+    parts.append(_qa_section(qa, _next_num(chart)))
     note = narrative.get("_note","")
     parts.append(f"""<div class="foot">ДЖЙОТИШ-АЛЬМАНАХ · {esc(name)}<br>
       Лахири (сидерик) · цельнознаковые дома · Вимшопака по Шодашаварге · SAV · Вимшоттари · Swiss Ephemeris<br>

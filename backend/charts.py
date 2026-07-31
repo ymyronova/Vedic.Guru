@@ -445,16 +445,6 @@ def months_overlay_svg(years):
     return "\n".join(p)
 
 
-def dignity_grid_html(chart):
-    from jyotish import VARGAS
-    vargas=list(VARGAS.keys())
-    dcolor=theme.DIGNITY_COLORS
-    rows=["<table class='grid'><thead><tr><th>Планета</th>"+"".join(f"<th>{v}</th>" for v in vargas)+"</tr></thead><tbody>"]
-    for k in ["Su","Mo","Ma","Me","Ju","Ve","Sa"]:
-        cells=f"<td class='pl'>{PL_RU[k]}</td>"
-        for v in vargas:
-            dg=chart["grid"][k][v]["dignity"]
-            cells+=f"<td style='color:{dcolor[dg]}'>{dg}</td>"
-        rows.append("<tr>"+cells+"</tr>")
-    rows.append("</tbody></table>")
-    return "".join(rows)
+# Сетка достоинств «планета × 16 варг» удалена вместе с разделом, который её
+# показывал. Итоговый Вимшопака-балл и его столбчатый график остались — они
+# переехали в «Интегральную карту», где балл и есть ось «игрок».

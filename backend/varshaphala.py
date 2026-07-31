@@ -170,34 +170,54 @@ def compute_muntha(natal_lagna_sign: int, age_completed: int) -> int:
 
 
 # ========================================================== таджикские силы ==
-def _pancha_vargiya(planet: str, lon: float, lagna_sign: int) -> dict:
-    """Панча-Варгия бала — пять составляющих, максимум 20 единиц.
+PANCHA_MAX = 80.0        # 30 + 20 + 15 + 10 + 5
+HARSHA_MAX = 20.0        # четыре условия по 5
 
-    Разбивка по пяти варгам возвращается отдельно: она нужна стековому
-    столбцу, где важна не только сумма, но и чем именно набрана сила.
+
+def _relation_scale(planet: str, other: str, top: float) -> float:
+    """Доля от максимума по отношению планеты к владельцу участка."""
+    if other == planet:
+        return top
+    if other in FRIENDS.get(planet, []):
+        return top * 0.75
+    if other in ENEMIES.get(planet, []):
+        return top * 0.25
+    return top * 0.5
+
+
+def _pancha_vargiya(planet: str, lon: float, lagna_sign: int) -> dict:
+    """Панча-Варгия бала — пять составляющих, максимум 80 единиц.
+
+    Шкала классическая: гриха 30, уччха 20, хадда 15, дреккана 10, навамша 5.
+    Разбивка возвращается отдельно от суммы: два одинаковых итога, набранных
+    по-разному, — разные ситуации, и стековый столбец должен это показывать.
     """
     sign = _sidx(lon)
     deg = _within(lon)
 
-    # 1. Грихабала — достоинство в знаке (0–5)
-    griha = {"Э": 5.0, "МТ": 4.0, "С": 4.0, "д": 3.0,
-             "н": 2.0, "в": 1.0, "П": 0.0}[_dignity(planet, sign)]
-    # 2. Хаддабала — попадание в свой предел (0–4)
-    hadda = 4.0 if _hadda_lord(sign, deg) == planet else 1.0
-    # 3. Дреккана — треть знака (0–3)
+    # 1. Грихабала — достоинство в знаке (0–30)
+    griha = {"Э": 30.0, "МТ": 30.0, "С": 30.0, "д": 15.0,
+             "н": 7.5, "в": 3.75, "П": 0.0}[_dignity(planet, sign)]
+    # 2. Уччхабала — удалённость от точки падения (0–20)
+    if planet in EXALT:
+        arc = abs((lon - EXALT[planet] * 30 + 180) % 360 - 180)
+        uchcha = 20.0 * (180 - arc) / 180
+    else:
+        uchcha = 10.0
+    # 3. Хаддабала — египетский предел (0–15)
+    hadda = _relation_scale(planet, _hadda_lord(sign, deg), 15.0)
+    # 4. Дрекканабала — треть знака (0–10)
     drek = (sign + int(deg // 10) * 4) % 12
-    drekkana = 3.0 if RULER[drek] == planet else 1.0
-    # 4. Навамша — девятая (0–5)
+    drekkana = _relation_scale(planet, RULER[drek], 10.0)
+    # 5. Навамшабала — девятая (0–5)
     starts = {0: 0, 4: 0, 8: 0, 1: 9, 5: 9, 9: 9,
               2: 6, 6: 6, 10: 6, 3: 3, 7: 3, 11: 3}
     nav = (starts[sign] + int(deg // (30 / 9))) % 12
-    navamsha = 5.0 if RULER[nav] == planet else 2.0
-    # 5. Двадашамша — двенадцатая (0–3)
-    dwa = (sign + int(deg // 2.5)) % 12
-    dwadash = 3.0 if RULER[dwa] == planet else 1.0
+    navamsha = _relation_scale(planet, RULER[nav], 5.0)
 
-    parts = {"грихабала": griha, "хаддабала": hadda, "дрекканабала": drekkana,
-             "навамшабала": navamsha, "двадашамшабала": dwadash}
+    parts = {"знак": round(griha, 2), "высота": round(uchcha, 2),
+             "предел": round(hadda, 2), "треть": round(drekkana, 2),
+             "девятая": round(navamsha, 2)}
     return {"parts": parts, "total": round(sum(parts.values()), 2)}
 
 
@@ -225,30 +245,40 @@ def _hadda_lord(sign: int, deg: float) -> str:
     return HADDA[sign][-1][1]
 
 
-# Харша-бала — пять двоичных условий по 5 единиц, максимум 20.
+MALE_PLANETS = {"Su", "Ma", "Ju"}
+FEMALE_PLANETS = {"Mo", "Ve"}
+
+
 def _harsha_bala(planet: str, lon: float, lagna_sign: int,
                  is_day: bool, sun_lon: float) -> dict:
+    """Харша-бала — четыре двоичных условия по 5 единиц, максимум 20.
+
+    Набор восстановлен по эталону: там Юпитер получает 20 из 20, стоя в знаке
+    врага, — значит достоинство в число условий не входит. Остаются своя
+    полусфера, своя половина суток, свой род знака и добрый дом; на этом наборе
+    эталонные 20/20 воспроизводятся.
+    """
     sign = _sidx(lon)
     house = (sign - lagna_sign) % 12 + 1
-    benefic = planet in ("Ju", "Ve", "Me", "Mo")
     diurnal = planet in ("Su", "Ju", "Sa")
+    male_sign = sign % 2 == 0
+    if planet in MALE_PLANETS:
+        gender_ok = male_sign
+    elif planet in FEMALE_PLANETS:
+        gender_ok = not male_sign
+    else:                                   # Меркурий и Сатурн — бесполые
+        gender_ok = True
 
     parts = {
-        # своя обитель или экзальтация
-        "в своём достоинстве": 5.0 if _dignity(planet, sign) in ("Э", "С", "МТ") else 0.0,
-        # в своей половине суток
+        # дневные планеты сильны над горизонтом (дома 7–12), ночные — под ним
+        "своя полусфера": 5.0 if diurnal == (house >= 7) else 0.0,
         "своё время суток": 5.0 if diurnal == is_day else 0.0,
-        # в своей половине зодиака относительно горизонта
-        "своя полусфера": 5.0 if ((house <= 6) != is_day) else 0.0,
-        # не сожжена
-        "вне сожжения": 5.0 if not _is_combust(planet, lon, sun_lon) else 0.0,
-        # в благоприятном доме
+        "свой род знака": 5.0 if gender_ok else 0.0,
         "добрый дом": 5.0 if house in (1, 4, 5, 7, 9, 10, 11) else 0.0,
     }
-    # Пять условий по 5 дают 25; классический максимум 20, поэтому лишнее
-    # условие «добрый дом» весит 0 при уже полном наборе — нормируем.
-    total = min(20.0, sum(parts.values()))
-    return {"parts": parts, "total": round(total, 2), "benefic": benefic}
+    return {"parts": parts, "total": round(sum(parts.values()), 2),
+            "benefic": planet in ("Ju", "Ve", "Me", "Mo"),
+            "combust": _is_combust(planet, lon, sun_lon)}
 
 
 def _is_combust(planet: str, lon: float, sun_lon: float) -> bool:
@@ -669,21 +699,32 @@ def compute_annual_dashas(pravesh: datetime, length_days: float,
 
 
 # ============================================================ Варшеша ========
+# Триращи-пати: владыка трети зодиака по стихии знака, отдельно для дневной и
+# ночной карты. Управитель знака здесь ни при чём — подстановка RULER давала
+# лишнего претендента и уводила выбор управителя года.
+TRIRASHI = {
+    "огонь": ("Su", "Ju"), "земля": ("Ve", "Mo"),
+    "воздух": ("Sa", "Me"), "вода": ("Ve", "Ma"),
+}
+ELEMENT = ["огонь", "земля", "воздух", "вода"] * 3
+
+
 def compute_varshesha(lons: dict, lagna_lon: float, muntha_sign: int,
                       is_day: bool, weekday_lord: str) -> dict:
     """Управитель года — сильнейший из пяти классических претендентов.
 
-    Претенденты: управитель Мунтхи, управитель года по дню недели, управитель
-    Лагны, управитель знака Луны и Трираши-пати. Побеждает набравший больше
+    Претенденты: управитель Мунтхи, управитель Лагны года, управитель знака
+    Луны, владыка дня входа и Триращи-пати. Побеждает набравший больше
     Панча-Варгия бала — числом, а не предпочтением.
     """
     lagna_sign = _sidx(lagna_lon)
+    trirashi = TRIRASHI[ELEMENT[lagna_sign]][0 if is_day else 1]
     claim = {
         "управитель Мунтхи": RULER[muntha_sign],
-        "управитель дня входа": weekday_lord,
         "управитель Лагны года": RULER[lagna_sign],
         "управитель знака Луны": RULER[_sidx(lons["Mo"])],
-        "управитель трети зодиака": RULER[_sidx(lons["Su"])],
+        "владыка дня входа": weekday_lord,
+        "владыка трети зодиака": trirashi,
     }
     scored = []
     for role, p in claim.items():
@@ -803,6 +844,159 @@ def compute_monthly(pravesh: datetime, length_days: float, lons: dict,
         raise VarshaphalaError(
             f"по месяцам разложено {placed} сахамов из {len(sahams)}")
     return months
+
+
+# ======================================================== сборка частей ======
+WEEKDAY_LORD = ["Mo", "Ma", "Me", "Ju", "Ve", "Sa", "Su"]   # пн…вс
+
+
+def _antardasha_span(natal_moon_lon: float, birth_naive: datetime,
+                     start: datetime, end: datetime) -> tuple:
+    """Антардаши Вимшоттари, покрывающие отрезок [start, end].
+
+    Берётся не готовый список текущей махадаши, а полная последовательность:
+    годовая часть может попасть на стык махадаш, и обрезанный список оставил бы
+    в шкале дыру ровно на переходе.
+    """
+    nak = int(natal_moon_lon // (360 / 27))
+    lord = ["Ke", "Ve", "Su", "Mo", "Ma", "Ra", "Ju", "Sa", "Me"][nak % 9]
+    frac = (natal_moon_lon - nak * (360 / 27)) / (360 / 27)
+    balance = (1 - frac) * VIM_YEARS[lord]
+
+    def add_years(dt, y):
+        return dt + timedelta(days=y * 365.2425)
+
+    out, cur, i0, first = [], birth_naive, VIM_SEQ.index(lord), True
+    md_at_start = None
+    for _cycle in range(2):
+        for k in range(9):
+            md = VIM_SEQ[(i0 + k) % 9]
+            dur = balance if first else VIM_YEARS[md]
+            md_end = add_years(cur, dur)
+            first = False
+            c2 = cur
+            ai = VIM_SEQ.index(md)
+            for j in range(9):
+                al = VIM_SEQ[(ai + j) % 9]
+                aend = add_years(c2, VIM_YEARS[md] * VIM_YEARS[al] / 120.0)
+                # первая махадаша укорочена остатком, антардаши в ней сжимаются
+                if md_end < aend:
+                    aend = md_end
+                if c2 < end and aend > start:
+                    out.append({"lord": PL_RU[al], "code": al,
+                                "start": c2, "end": aend})
+                    if md_at_start is None and c2 <= start < aend:
+                        md_at_start = md
+                c2 = aend
+                if c2 >= md_end:
+                    break
+            cur = md_end
+    return out, md_at_start
+
+
+def build_annual_parts(natal_chart: dict, birth_naive: datetime, lat: float,
+                       lon_geo: float, tz_name: str, count: int = 3,
+                       place: str = "", start_year: int | None = None) -> list:
+    """Годовые части: расчёт, а не оформление. По умолчанию три года.
+
+    Возвращает список готовых частей — каждая содержит всё, на что опирается и
+    отрисовка, и текст, и шлюз проверки.
+    """
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
+    natal_sun = natal_chart["planets"]["Su"]["lon"]
+    natal_moon = natal_chart["planets"]["Mo"]["lon"]
+    natal_lagna = natal_chart["lagna"]
+    natal_jd = swe.julday(birth_naive.year, birth_naive.month, birth_naive.day,
+                          birth_naive.hour + birth_naive.minute / 60, swe.GREG_CAL)
+    first_year = start_year or datetime.now(timezone.utc).year
+
+    flags = swe.FLG_SWIEPH | swe.FLG_SIDEREAL | swe.FLG_SPEED
+    ids = {"Su": swe.SUN, "Mo": swe.MOON, "Ma": swe.MARS, "Me": swe.MERCURY,
+           "Ju": swe.JUPITER, "Ve": swe.VENUS, "Sa": swe.SATURN}
+
+    parts = []
+    for n in range(count):
+        year = first_year + n
+        pv = compute_varsha_pravesh(natal_sun, natal_jd, year, tz_name)
+        jd = pv["jd"]
+
+        lons = {}
+        for code, pid in ids.items():
+            lons[code] = swe.calc_ut(jd, pid, flags)[0][0]
+        ra = swe.calc_ut(jd, swe.MEAN_NODE, flags)[0][0]
+        lons["Ra"], lons["Ke"] = ra, (ra + 180) % 360
+
+        _, ascmc = swe.houses_ex(jd, lat, lon_geo, b'A', swe.FLG_SIDEREAL)
+        lagna_lon = ascmc[0]
+        lagna_sign = _sidx(lagna_lon)
+
+        # день или ночь: Солнце над горизонтом — дневная карта
+        sun_house = (_sidx(lons["Su"]) - lagna_sign) % 12 + 1
+        is_day = sun_house >= 7
+
+        age = year - birth_naive.year
+        muntha_sign = compute_muntha(natal_lagna, age)
+        weekday = WEEKDAY_LORD[pv["local"].weekday()]
+        varshesha = compute_varshesha(lons, lagna_lon, muntha_sign, is_day, weekday)
+
+        tajika = compute_tajika_yogas(lons, lagna_lon, varshesha["winner"]["planet"],
+                                      is_day)
+        sahams = compute_sahams(lons, lagna_lon, is_day)
+
+        start = pv["local"].replace(tzinfo=None)
+        nxt = compute_varsha_pravesh(natal_sun, natal_jd, year + 1, tz_name)
+        length = (nxt["jd"] - pv["jd"])
+        ad_seq, md_code = _antardasha_span(natal_moon, birth_naive, start,
+                                           start + timedelta(days=length))
+        dashas = compute_annual_dashas(start, length, natal_moon, age, lons,
+                                       lagna_lon, md_code, ad_seq)
+        months = compute_monthly(start, length, lons, lagna_lon, muntha_sign,
+                                 sahams, dashas, lat, lon_geo)
+
+        planets = []
+        for code in ["Su", "Mo", "Ma", "Me", "Ju", "Ve", "Sa", "Ra", "Ke"]:
+            sgn = _sidx(lons[code])
+            rules = [] if code in ("Ra", "Ke") else \
+                [h for h in range(1, 13) if RULER[(lagna_sign + h - 1) % 12] == code]
+            dg = _dignity(code, sgn)
+            planets.append({
+                "code": code, "name": PL_RU[code], "pos": _fmt(lons[code]),
+                "sign": sgn, "sign_ru": SIGNS_RU[sgn],
+                "house": (sgn - lagna_sign) % 12 + 1, "rules": rules,
+                "dignity": dg, "dignity_ru": DIGNITY_WORD[dg],
+            })
+
+        parts.append({
+            "year": year, "label": f"{year}/{(year + 1) % 100:02d}", "age": age,
+            "place": place, "is_day": is_day,
+            "pravesh": {"local": start, "utc": pv["utc"],
+                        "error_deg": pv["error_deg"], "jd": pv["jd"]},
+            "length_days": length,
+            "lagna_lon": lagna_lon, "lagna_sign": lagna_sign,
+            "lagna_sign_ru": SIGNS_RU[lagna_sign],
+            "lagna_dms": _fmt(lagna_lon).split(" ")[0],
+            "lagna_lord": RULER[lagna_sign],
+            "lons": lons, "planets": planets,
+            "muntha": {"sign": muntha_sign, "sign_ru": SIGNS_RU[muntha_sign],
+                       "house": (muntha_sign - lagna_sign) % 12 + 1,
+                       "lord": RULER[muntha_sign],
+                       "lord_ru": PL_RU[RULER[muntha_sign]]},
+            "varshesha": varshesha,
+            "tajika": tajika, "sahams": sahams, "dashas": dashas,
+            "months": months,
+            "pancha": {p: _pancha_vargiya(p, lons[p], lagna_sign) for p in SEVEN},
+            "harsha": {p: _harsha_bala(p, lons[p], lagna_sign, is_day, lons["Su"])
+                       for p in SEVEN},
+        })
+    return parts
+
+
+DIGNITY_WORD = {"Э": "экзальтация — на пике", "МТ": "мулатрикона — почти дома",
+                "С": "свой знак — «дома», работает уверенно",
+                "д": "у друга — условия благоприятные",
+                "н": "нейтрально — ни помощи, ни помех",
+                "в": "у врага — среда сопротивляется",
+                "П": "падение — заметно стеснена"}
 
 
 # =========================================================== самопроверка ====
