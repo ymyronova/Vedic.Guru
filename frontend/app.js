@@ -461,37 +461,58 @@ $("restart").addEventListener("click", () => {
 // grid poorly, which this layout uses in the section headers, planet blocks and
 // two-column cards. A weaker second renderer would produce a worse PDF than the
 // one Chrome already makes from these rules.
-// The "выберите «Сохранить как PDF»" step is only news once. Remember that it
-// has been shown, so it does not nag on every later download.
-const PRINT_HINT_KEY = "jyotish.printHintSeen";
-const printHintSeen = () => {
-  // Storage can throw in private mode or when cookies are blocked. Treat that
-  // as "not seen": showing the hint again is harmless, an exception is not.
-  try { return localStorage.getItem(PRINT_HINT_KEY) === "1"; }
-  catch { return false; }
-};
-const markPrintHintSeen = () => {
-  try { localStorage.setItem(PRINT_HINT_KEY, "1"); } catch {}
-};
+function saveBlob(blob, filename){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
-$("download").addEventListener("click", () => {
-  const f = $("frame");
-  if (!f || !lastAlmanacHtml){ alert("Альманах ещё не готов."); return; }
-  if (!printHintSeen()){
-    $("print-hint").classList.remove("hidden");
-    markPrintHintSeen();
+// Fallback only: used when the server cannot build the PDF. The almanac carries
+// @page A4 and the page-break rules, so the browser's own print dialog produces
+// the same document — it just costs the user an extra click.
+function printFallback(reason){
+  const hint = $("print-hint");
+  if (hint){
+    hint.innerHTML = "Не удалось собрать PDF на сервере, поэтому открыто окно печати — " +
+                     "выберите принтер <b>«Сохранить как PDF»</b>." +
+                     (reason ? ` <span style="opacity:.7">(${reason})</span>` : "");
+    hint.classList.remove("hidden");
   }
+  const f = $("frame");
   try{
-    // srcdoc is same-origin, so the frame's own print() is reachable and prints
-    // the document alone — not the surrounding app.
     f.contentWindow.focus();
     f.contentWindow.print();
   }catch(e){
-    // Some browsers refuse print() on a srcdoc frame. Open the document in its
-    // own tab, where Ctrl+P works normally.
     const w = window.open("", "_blank");
     if (w){ w.document.write(lastAlmanacHtml); w.document.close(); w.focus(); }
-    else alert("Не удалось открыть окно печати: " + e.message);
+  }
+}
+
+$("download").addEventListener("click", async () => {
+  if (!lastAlmanacHtml){ alert("Альманах ещё не готов."); return; }
+  const btn = $("download");
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Собираю PDF…";
+  try{
+    const r = await fetch("/api/pdf", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({html: lastAlmanacHtml, filename: lastName || "almanac"}),
+    });
+    if (!r.ok){
+      let why = `HTTP ${r.status}`;
+      try{ const d = await r.json(); why = d.detail || why; }catch{}
+      throw new Error(why);
+    }
+    const blob = await r.blob();
+    if (blob.type && blob.type.indexOf("pdf") === -1) throw new Error("сервер вернул не PDF");
+    saveBlob(blob, (lastName || "almanac").replace(/\s+/g, "_") + ".pdf");
+    if ($("print-hint")) $("print-hint").classList.add("hidden");
+  }catch(e){
+    printFallback(e.message);
+  }finally{
+    btn.disabled = false; btn.textContent = label;
   }
 });
 

@@ -7,6 +7,13 @@ FROM python:3.12-slim
 # installed then kept minimal. tzdata gives correct historical timezones.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gcc build-essential tzdata \
+    # WeasyPrint (серверная сборка PDF): Pango рисует текст, остальное — его
+    # зависимости и разбор растровых картинок.
+    libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfribidi0 \
+    libffi8 libjpeg62-turbo libopenjp2-7 shared-mime-info \
+    # Шрифты ОБЯЗАТЕЛЬНЫ: CSS просит 'DejaVu Serif' и 'FreeSerif'. Без них
+    # кириллица в PDF выйдет квадратами — контейнеру неоткуда их взять.
+    fonts-dejavu-core fonts-freefont-ttf \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

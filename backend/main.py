@@ -10,13 +10,14 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import geo, jyotish, interpret, render, rectify as rectify_engine, synastry as synastry_engine
-import store, verify
+import pdfout, store, verify
 
 app = FastAPI(title="Jyotish Almanac")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -333,6 +334,43 @@ def health():
             "model": os.environ.get("JYOTISH_MODEL", "claude-sonnet-5"),
             "engine_verified": engine["ok"],
             "engine_pass_rate": engine["pass_rate"]}
+
+class PdfRequest(BaseModel):
+    html: str
+    filename: str = "almanac"
+
+@app.post("/api/pdf")
+def to_pdf(req: PdfRequest):
+    """Собрать PDF из готового HTML альманаха — один клик, без окна печати.
+
+    HTML приходит от клиента, поэтому все внешние загрузки при рендере
+    запрещены (см. pdfout). Документ самодостаточен, так что запрещать нечего.
+    """
+    ok, why = pdfout.available()
+    if not ok:
+        # 503, а не 500: движка просто нет — фронтенд по этому коду откатывается
+        # на окно печати браузера, которое даёт тот же PDF в два клика.
+        raise HTTPException(503, f"Серверная сборка PDF недоступна ({why}).")
+    try:
+        data = pdfout.html_to_pdf(req.html)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Не удалось собрать PDF: {type(e).__name__}: {e}")
+
+    name = pdfout.safe_filename(req.filename)
+    # RFC 5987: имя может быть кириллическим, поэтому ASCII-запасной вариант
+    # плюс filename* в UTF-8.
+    disposition = (f"attachment; filename=\"almanac.pdf\"; "
+                   f"filename*=UTF-8''{quote(name + '.pdf')}")
+    return Response(content=data, media_type="application/pdf",
+                    headers={"Content-Disposition": disposition})
+
+@app.get("/api/pdf")
+def pdf_status():
+    """Доступна ли серверная сборка PDF (и какой версией)."""
+    ok, why = pdfout.available()
+    return {"available": ok, "engine": "weasyprint" if ok else None, "detail": why}
 
 @app.get("/api/cache")
 def cache_stats():

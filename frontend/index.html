@@ -134,10 +134,9 @@
         <button id="restart" class="ghost">Новая карта</button>
       </div>
     </div>
-    <p class="hint print-hint hidden" id="print-hint">
-      В открывшемся окне печати выберите принтер <b>«Сохранить как PDF»</b>
-      (Destination → Save as PDF). Разметка A4 и разрывы страниц уже заданы в документе.
-    </p>
+    <!-- Показывается только если серверная сборка PDF не сработала; текст
+         подставляется из app.js вместе с причиной. -->
+    <p class="hint print-hint hidden" id="print-hint"></p>
     <iframe id="frame" title="almanac"></iframe>
   </section>
 

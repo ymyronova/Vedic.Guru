@@ -8,3 +8,4 @@ geopy>=2.4
 anthropic>=0.69          # output_config (structured outputs) + adaptive thinking
 geonamescache>=2.0
 psycopg[binary]>=3.1     # постоянный кэш нарратива, если задан DATABASE_URL
+weasyprint>=62           # серверная сборка PDF (нужны системные libpango + шрифты)
