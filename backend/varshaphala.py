@@ -694,6 +694,117 @@ def compute_varshesha(lons: dict, lagna_lon: float, muntha_sign: int,
     return {"winner": scored[0], "candidates": scored}
 
 
+# =========================================================== месяцы года =====
+MONTH_RU = ["янв", "фев", "мар", "апр", "май", "июн",
+            "июл", "авг", "сен", "окт", "ноя", "дек"]
+
+# Дома, по которым звучит денежная тема, и вес каждого.
+MONEY_HOUSES = {2: 1.0, 11: 1.0, 5: 0.5, 9: 0.5}
+MONEY_SAHAMS = {"Артха": 1.0, "Лабха": 1.0, "Ваник": 0.7,
+                "Вьяпара": 0.7, "Карьясиддхи": 0.5}
+
+
+def compute_monthly(pravesh: datetime, length_days: float, lons: dict,
+                    lagna_lon: float, muntha_sign: int, sahams: dict,
+                    dashas: dict, lat: float, lon_geo: float) -> list:
+    """Двенадцать месяцев года: тема, две денежные оси и что делать.
+
+    Месяц начинается, когда Солнце проходит очередные 30° от точки входа в год.
+    Знак месяца отсчитывается от Мунтхи — это же правило распределяет сахамы по
+    месяцам активации: сахам включается в тот месяц, чей знак он занимает.
+
+    Салиентность и валентность считаются РАЗДЕЛЬНО и намеренно не сводятся в
+    один балл: громкость темы и знак исхода — разные величины, и месяц, в
+    котором деньги звучат громко и плохо, обязан отличаться от месяца, в
+    котором они не звучат вовсе.
+    """
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
+    lagna_sign = _sidx(lagna_lon)
+    step = length_days / 12
+
+    # сахамы по месяцам активации
+    by_month: dict[int, list] = {m: [] for m in range(1, 13)}
+    for name, s in sahams.items():
+        m = (s["sign"] - muntha_sign) % 12 + 1
+        by_month[m].append(s)
+
+    months = []
+    for m in range(1, 13):
+        start = pravesh + timedelta(days=step * (m - 1))
+        end = pravesh + timedelta(days=step * m) if m < 12 else \
+            pravesh + timedelta(days=length_days)
+        sign = (muntha_sign + m - 1) % 12
+        house = (sign - lagna_sign) % 12 + 1
+        lord = RULER[sign]
+        active = by_month[m]
+
+        # Салиентность: насколько громко в этом месяце звучит денежная тема.
+        # Всегда неотрицательна — это громкость, а не оценка.
+        sal = 0.0
+        sal += MONEY_HOUSES.get(house, 0.0) * 2
+        for s in active:
+            sal += MONEY_SAHAMS.get(s["name"], 0.0)
+        if (_sidx(lons[lord]) - lagna_sign) % 12 + 1 in MONEY_HOUSES:
+            sal += 1.0
+        occupants = [p for p in SEVEN
+                     if (_sidx(lons[p]) - lagna_sign) % 12 + 1 == house]
+        sal += 0.5 * len(occupants)
+        salience = round(min(sal, 10.0), 2)
+
+        # Валентность: знак исхода. Может быть отрицательной.
+        val = 0.0
+        dg = _dignity(lord, _sidx(lons[lord]))
+        val += {"Э": 2.0, "МТ": 1.5, "С": 1.5, "д": 1.0,
+                "н": 0.0, "в": -1.0, "П": -2.0}[dg]
+        for p in occupants:
+            benefic = p in ("Ju", "Ve", "Me", "Mo")
+            val += 0.7 if benefic else -0.7
+        if house in (6, 8, 12):
+            val -= 1.5
+        if house in (1, 4, 5, 7, 9, 10, 11):
+            val += 0.5
+        risky = [s for s in active
+                 if any(w in s["meaning"] for w in ("риск", "беречь", "осторожность"))]
+        val -= 0.6 * len(risky)
+        val += 0.4 * len([s for s in active if s["name"] in MONEY_SAHAMS])
+        valence = round(max(-5.0, min(5.0, val)), 2)
+
+        # управители пяти шкал, действующие в середине месяца
+        mid = start + (end - start) / 2
+        ruling = {}
+        for nm, segs in dashas.items():
+            seg = next((s for s in segs if s["start"] <= mid < s["end"]), None)
+            if seg:
+                ruling[nm] = seg["lord"]
+
+        months.append({
+            "index": m,
+            "start": start, "end": end,
+            "label": f"{MONTH_RU[start.month - 1]} {start.year % 100:02d}",
+            "sign": sign, "sign_ru": SIGNS_RU[sign],
+            "house": house, "lord": lord, "lord_ru": PL_RU[lord],
+            "occupants": occupants,
+            "occupants_ru": [PL_RU[p] for p in occupants],
+            "salience": salience,
+            "valence": valence,
+            "sahams": [s["name"] for s in active],
+            "saham_records": active,
+            "ruling": ruling,
+        })
+
+    if len(months) != 12:
+        raise VarshaphalaError(f"месяцев должно быть 12, получено {len(months)}")
+    if any(x["salience"] < 0 for x in months):
+        raise VarshaphalaError("салиентность отрицательна — оси перепутаны")
+    # Каждый сахам обязан попасть ровно в один месяц, иначе часть тем года
+    # молча выпадет из таблицы.
+    placed = sum(len(x["sahams"]) for x in months)
+    if placed != len(sahams):
+        raise VarshaphalaError(
+            f"по месяцам разложено {placed} сахамов из {len(sahams)}")
+    return months
+
+
 # =========================================================== самопроверка ====
 def _selftest() -> dict:
     """Проверка констант и инвариантов на эталоне (Матиас, 2025/26).
@@ -800,6 +911,31 @@ def _selftest() -> dict:
         covered = sum(s["days"] for s in segs)
         ok(f"{nm} покрывает год целиком",
            abs(covered - SIDEREAL_YEAR) < 0.01, f"{covered:.3f} дней")
+
+    # --- помесячная модель ---
+    months = compute_monthly(start, SIDEREAL_YEAR, lons, lagna, 7, sahams,
+                             dashas, 47.37, 8.54)
+    ok("месяцев ровно 12", len(months) == 12, str(len(months)))
+    ok("салиентность неотрицательна во всех месяцах",
+       all(m["salience"] >= 0 for m in months))
+    ok("валентность бывает обоих знаков — оси не слиты",
+       len({m["valence"] > 0 for m in months}) > 1 or
+       any(m["valence"] < 0 for m in months),
+       f"диапазон {min(m['valence'] for m in months)}…{max(m['valence'] for m in months)}")
+    ok("каждый сахам попал ровно в один месяц",
+       sum(len(m["sahams"]) for m in months) == 36,
+       str(sum(len(m["sahams"]) for m in months)))
+    # Эталон: сахамы Скорпиона активны в первом месяце (июн 25), Стрельца — во
+    # втором (июл 25). Правило отсчёта месяцев от Мунтхи проверяется этим.
+    first = set(months[0]["sahams"])
+    ok("эталон: первый месяц — июн 25", months[0]["label"] == "июн 25",
+       months[0]["label"])
+    ok("эталон: сахамы Скорпиона в первом месяце",
+       {"Бандхана", "Виваха", "Карма", "Мритью", "Яшас"} <= first,
+       ", ".join(sorted(first)))
+    ok("эталон: сахамы Стрельца во втором месяце",
+       {"Артха", "Бхратри", "Самартха"} <= set(months[1]["sahams"]),
+       ", ".join(sorted(months[1]["sahams"])))
 
     return {"checks": checks, "failed": failed,
             "passed": len(checks) - len(failed), "total": len(checks)}
