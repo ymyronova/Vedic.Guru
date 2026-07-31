@@ -332,12 +332,66 @@ const markLagnaSeen = () => {
   try { localStorage.setItem(SEEN_LAGNA_KEY, "1"); } catch {}
 };
 
+// ---- remembered birth details ---------------------------------------------
+// There is no account system, so "credentials" here are the birth details kept
+// in this browser. Saved once rectification has settled a time, so the value
+// stored is the reconstructed one rather than the 12:00 placeholder the user
+// started from — and restored on the next visit so nothing is retyped.
+const PROFILE_KEY = "jyotish.birth";
+
+function saveProfile(p){
+  try{
+    localStorage.setItem(PROFILE_KEY, JSON.stringify({
+      name: p.name || "", date: p.date || "", time: p.time || "",
+      place: $("place").value.trim() || "",
+      lat: $("lat").value || "", lon: $("lon").value || "", tz: $("tz").value.trim() || "",
+      saved_at: new Date().toISOString(),
+    }));
+  }catch{}                      // private mode: remembering is a nicety, not a feature
+}
+
+function loadProfile(){
+  try{ return JSON.parse(localStorage.getItem(PROFILE_KEY) || "null"); }
+  catch{ return null; }
+}
+
+function restoreProfile(){
+  const p = loadProfile();
+  if (!p) return false;
+  const set = (id, v) => { if (v && $(id) && !$(id).value) $(id).value = v; };
+  set("name", p.name); set("date", p.date); set("time", p.time);
+  set("place", p.place); set("lat", p.lat); set("lon", p.lon); set("tz", p.tz);
+  if (p.place && $("geo-status") && p.lat && p.lon){
+    $("geo-status").textContent = `✓ сохранено: ${p.place} · ${p.lat}, ${p.lon}`
+                                + (p.tz ? ` · ${p.tz}` : "");
+    $("geo-status").className = "geo ok";
+  }
+  return true;
+}
+
 function applyReturningVisitor(){
   const returning = seenLagnaStep();
   $("go").textContent = returning ? "Собрать альманах →" : "Рассчитать лагну →";
   $("go-lagna").classList.toggle("hidden", !returning);
 }
 applyReturningVisitor();
+
+if (restoreProfile()) $("forget-profile").classList.remove("hidden");
+
+// Birth details are personal, so leaving them in the browser with no way out
+// would be wrong. One click clears both the details and the returning-visitor
+// flag, putting the app back to how a newcomer finds it.
+$("forget-profile").addEventListener("click", () => {
+  try{
+    localStorage.removeItem(PROFILE_KEY);
+    localStorage.removeItem(SEEN_LAGNA_KEY);
+  }catch{}
+  ["name","date","time","place","lat","lon","tz"].forEach(id => { if ($(id)) $(id).value = ""; });
+  $("time").value = "12:00";
+  if ($("geo-status")){ $("geo-status").textContent = ""; $("geo-status").className = "geo"; }
+  $("forget-profile").classList.add("hidden");
+  applyReturningVisitor();
+});
 
 function validBirth(p){
   if (!p.date){ $("err").textContent = "Укажите дату рождения."; return false; }
@@ -353,6 +407,9 @@ async function buildAlmanac(p){
     const res = await api("/api/almanac", p);
     navGo("result-panel", {html: res.html, name: p.name});
     markLagnaSeen();          // they have now seen a finished chart
+    // Remember the details that produced this chart. Reached from rectification
+    // too, where p.time is the reconstructed time rather than the placeholder.
+    saveProfile(p);
     applyReturningVisitor();
     if (!res.has_ai){
       console.info("Claude недоступен — тексты в шаблонном режиме. Подробности: /api/ai");
@@ -385,6 +442,26 @@ $("go-lagna").addEventListener("click", async () => {
   const p = birthPayload();
   if (!validBirth(p)) return;
   await goToLagna(p);
+});
+
+// "Не знаю время рождения" — straight to event rectification. Without a time the
+// lagna is undetermined, so confirming one would be theatre: the 12:00 default
+// is a placeholder, not a guess worth showing. Skips the lagna panel entirely.
+$("no-time").addEventListener("click", async () => {
+  $("err").textContent = "";
+  const p = birthPayload();
+  if (!p.date){ $("err").textContent = "Укажите дату рождения."; return; }
+  if (!p.place && !(Number.isFinite(p.lat) && Number.isFinite(p.lon))){
+    $("err").textContent = "Укажите место рождения или координаты."; return; }
+  await loadCatalog();
+  const list = $("events-list");
+  if (!list.children.length){
+    list.appendChild(eventRow()); list.appendChild(eventRow()); list.appendChild(eventRow());
+  }
+  // Tell the engine to scan the whole day rather than a window around a time.
+  const un = $("unknown-time");
+  if (un) un.checked = true;
+  navGo("events-panel", null);
 });
 
 // ---- Step 2: full almanac ----

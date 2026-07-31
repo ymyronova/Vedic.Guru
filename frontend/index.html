@@ -36,7 +36,13 @@
     </div>
     <div class="row">
       <div class="field"><label>Дата рождения</label><input id="date" type="date"></div>
-      <div class="field"><label>Время</label><input id="time" type="time" value="12:00"></div>
+      <div class="field">
+        <label>Время</label>
+        <input id="time" type="time" value="12:00">
+        <!-- Ведёт сразу на ректификацию по событиям: без времени лагна
+             неопределима, а гадать по 12:00 хуже, чем восстановить по фактам. -->
+        <button id="no-time" class="linklike" type="button">Не знаю время рождения</button>
+      </div>
     </div>
     <div class="field">
       <label>Место рождения</label>
@@ -58,6 +64,11 @@
          в ректификацию по событиям, если время рождения неточное. -->
     <button id="go-lagna" class="ghost hidden" style="width:100%;margin-top:10px">
       Сначала уточнить лагну
+    </button>
+    <!-- Данные рождения личные: если браузер их запомнил, должен быть и способ
+         стереть. Показывается только когда есть что забывать. -->
+    <button id="forget-profile" class="linklike hidden" type="button">
+      Забыть мои данные в этом браузере
     </button>
     <p class="err" id="err"></p>
   </section>
