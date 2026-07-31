@@ -54,6 +54,11 @@ BAV_TOTALS = {"Su": 48, "Mo": 49, "Ma": 39, "Me": 54,
               "Ju": 56, "Ve": 52, "Sa": 39}
 HOUSE_BINDU_RANGE = (18, 42)
 
+# --- Varshaphala invariants (evals.json #16-19) ------------------------------
+VARSHA_RETURN_TOL = 0.001      # градусов — допуск схождения солнечного возврата
+TAJIKA_COUNT = 16
+SAHAM_COUNT = 36
+
 # --- Vimshopaka invariants (evals.json #13) ----------------------------------
 VARGA_COUNT = 16
 WEIGHTS_TOTAL = 20.0
@@ -249,6 +254,63 @@ def _add_vimshopaka_checks(chart: dict, ref: dict, add) -> None:
         not mismatched, ", ".join(mismatched) if mismatched else "все 7 совпали")
 
 
+def _add_varshaphala_checks(chart: dict, add) -> None:
+    """evals.json #16–19 — инварианты годового слоя.
+
+    Проверяется только если годовые части рассчитаны: натальный альманах без
+    Варшапхалы не должен падать из-за отсутствия домена, которого он не просил.
+    Но если части есть, их числа попадут и в текст, и в ответы на вопросы —
+    значит они обязаны пройти шлюз наравне с натальными.
+    """
+    parts = chart.get("varsha")
+    if not parts:
+        return
+
+    add("Годовые части рассчитаны", bool(parts), f"частей: {len(parts)}")
+
+    bad_ret = [f"{p['year']}: {p['pravesh']['error_deg']}°" for p in parts
+               if p["pravesh"]["error_deg"] > VARSHA_RETURN_TOL]
+    add(f"Солнечный возврат сошёлся (<{VARSHA_RETURN_TOL}°)", not bad_ret,
+        ", ".join(bad_ret) if bad_ret else f"все {len(parts)} в допуске",
+        critical=True)
+
+    natal_lagna = chart.get("lagna")
+    bad_mun = [f"{p['year']}: {p['muntha']['sign']}≠{(natal_lagna + p['age']) % 12}"
+               for p in parts
+               if natal_lagna is not None
+               and p["muntha"]["sign"] != (natal_lagna + p["age"]) % 12]
+    add("Мунтха = (натальная лагна + возраст) mod 12", not bad_mun,
+        ", ".join(bad_mun) if bad_mun else "совпадает во всех частях",
+        critical=True)
+
+    bad_y = [f"{p['year']}: {len(p['tajika']['yogas'])}" for p in parts
+             if len(p["tajika"]["yogas"]) != TAJIKA_COUNT]
+    add(f"Таджака-йог ровно {TAJIKA_COUNT}", not bad_y,
+        ", ".join(bad_y) if bad_y else "по 16 в каждой части", critical=True)
+
+    bad_s = [f"{p['year']}: {len(p['sahams'])}" for p in parts
+             if len(p["sahams"]) != SAHAM_COUNT]
+    add(f"Сахамов ровно {SAHAM_COUNT}", not bad_s,
+        ", ".join(bad_s) if bad_s else "по 36 в каждой части", critical=True)
+
+    out_range = [f"{p['year']}/{s['name']}" for p in parts
+                 for s in p["sahams"].values() if not 0 <= s["lon"] < 360]
+    add("Все сахамы в диапазоне 0–360", not out_range,
+        ", ".join(out_range) if out_range else "все в диапазоне")
+
+    # Каждая из пяти шкал обязана покрыть год целиком: дыра в шкале означает
+    # месяц, про который отчёт молча ничего не скажет.
+    gaps = []
+    for p in parts:
+        for name, segs in p["dashas"].items():
+            covered = sum(s["days"] for s in segs)
+            if abs(covered - p["length_days"]) > 0.01:
+                gaps.append(f"{p['year']}/{name}: {covered:.2f}≠{p['length_days']:.2f}")
+    add("Пять годовых даш покрывают год без разрывов", not gaps,
+        ", ".join(gaps) if gaps else f"проверено {len(parts) * 5} шкал",
+        critical=True)
+
+
 def cross_check(chart: dict, local_dt: datetime, lat: float, lon: float,
                 tz_name: str) -> dict:
     """Barrier 2 — recompute this chart with the second engine and compare."""
@@ -299,6 +361,7 @@ def cross_check(chart: dict, local_dt: datetime, lat: float, lon: float,
 
     _add_ashtakavarga_checks(chart, add)
     _add_vimshopaka_checks(chart, ref, add)
+    _add_varshaphala_checks(chart, add)
 
     passed = sum(1 for c in checks if c["passed"])
     total = len(checks)
